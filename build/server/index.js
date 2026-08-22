@@ -5,13 +5,14 @@ import { RemixServer, Meta, Links, Outlet, ScrollRestoration, Scripts, useRouteE
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
-import { Page, Card, EmptyState, Text, useIndexResourceState, Modal, BlockStack, Banner, InlineStack, Badge, Layout, FormLayout, Select, ChoiceList, Button, IndexTable, Thumbnail, List, DataTable, ProgressBar, Grid, Box, ButtonGroup, Tabs, Tooltip, TextField } from "@shopify/polaris";
+import { Page, Card, EmptyState, Text, useIndexResourceState, Modal, BlockStack, Banner, InlineStack, Badge, Layout, FormLayout, Select, ChoiceList, Button, IndexTable, Thumbnail, List, Frame, SkeletonBodyText, Toast, DataTable, ProgressBar, Box as Box$1, Icon, Grid, ButtonGroup, Tabs, Tooltip, TextField } from "@shopify/polaris";
 import { useState, useCallback, useMemo } from "react";
 import "@shopify/shopify-app-remix/adapters/node";
 import { shopifyApp, AppDistribution, ApiVersion } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import { PrismaClient } from "@prisma/client";
 import OpenAI from "openai";
+import { CheckCircleIcon } from "@shopify/polaris-icons";
 const streamTimeout = 5e3;
 function handleRequest(request, responseStatusCode, responseHeaders, remixContext, _loadContext) {
   return isbot(request.headers.get("user-agent") || "") ? handleBotRequest(request, responseStatusCode, responseHeaders, remixContext) : handleBrowserRequest(request, responseStatusCode, responseHeaders, remixContext);
@@ -614,6 +615,7 @@ ApiVersion.October24;
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || ""
 });
+const MAX_RETRIES = 3;
 const ALT_TEXT_SYSTEM_PROMPT = `You are an SEO expert specializing in e-commerce product image optimization.
 Analyze the product image and generate SEO-optimized alt text.
 
@@ -646,76 +648,103 @@ Respond in JSON format with:
 {
   "tags": ["tag1", "tag2", "tag3"]
 }`;
+function validateEnvironment() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error(
+      "OPENAI_API_KEY environment variable is not set. Please add it to your .env file. You can get an API key from https://platform.openai.com/api-keys"
+    );
+  }
+}
 async function analyzeImage(imageBase64, mimeType, productTitle, locale = "en") {
-  var _a, _b, _c;
+  var _a, _b;
+  validateEnvironment();
   const localeInstruction = getLocaleInstruction(locale);
   const dataUrl = `data:${mimeType};base64,${imageBase64}`;
   const userMessage = productTitle ? `Product title: "${productTitle}"
 
 ${localeInstruction}` : localeInstruction;
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: ALT_TEXT_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: userMessage },
-            { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
-          ]
-        }
-      ],
-      response_format: { type: "json_object" },
-      max_tokens: 500
-    });
-    const text = ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || "{}";
-    const cleanedText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleanedText);
-    return {
-      altText: ((_c = parsed.altText) == null ? void 0 : _c.substring(0, 125)) || "",
-      analysis: parsed.analysis || { objects: [], colors: [], context: "", category: "" }
-    };
-  } catch (error) {
-    console.error("[OpenAI] analyzeImage error:", error);
-    return {
-      altText: "",
-      analysis: { objects: [], colors: [], context: "", category: "" }
-    };
+  let lastError = null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: ALT_TEXT_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userMessage },
+              { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+            ]
+          }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 500
+      });
+      const text = ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || "{}";
+      const cleanedText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const parsed = JSON.parse(cleanedText);
+      if (parsed.altText && parsed.altText.length > 0) {
+        return {
+          altText: parsed.altText.substring(0, 125),
+          analysis: parsed.analysis || { objects: [], colors: [], context: "", category: "" }
+        };
+      }
+      lastError = new Error("Empty alt text in response");
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (error instanceof OpenAI.RateLimitError || error instanceof OpenAI.APIError) {
+        await new Promise((r) => setTimeout(r, 1e3 * (attempt + 1)));
+      }
+    }
   }
+  return {
+    altText: "",
+    analysis: { objects: [], colors: [], context: "", category: "" }
+  };
 }
 async function generateTags(imageBase64, mimeType, productTitle, productDescription, locale = "en") {
   var _a, _b;
+  validateEnvironment();
   const localeInstruction = getLocaleInstruction(locale);
   const dataUrl = `data:${mimeType};base64,${imageBase64}`;
   const userMessage = `Product Title: "${productTitle}"
 Product Description: "${productDescription || "No description available"}"
 
 ${localeInstruction}`;
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: TAGS_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: userMessage },
-            { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
-          ]
-        }
-      ],
-      response_format: { type: "json_object" },
-      max_tokens: 500
-    });
-    const text = ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || "{}";
-    const cleanedText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const parsed = JSON.parse(cleanedText);
-    return { tags: parsed.tags || [] };
-  } catch (error) {
-    console.error("[OpenAI] generateTags error:", error);
-    return { tags: [] };
+  let lastError = null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: TAGS_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userMessage },
+              { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+            ]
+          }
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 500
+      });
+      const text = ((_b = (_a = response.choices[0]) == null ? void 0 : _a.message) == null ? void 0 : _b.content) || "{}";
+      const cleanedText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const parsed = JSON.parse(cleanedText);
+      if (parsed.tags && Array.isArray(parsed.tags) && parsed.tags.length > 0) {
+        return { tags: parsed.tags };
+      }
+      lastError = new Error("Empty tags in response");
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (error instanceof OpenAI.RateLimitError || error instanceof OpenAI.APIError) {
+        await new Promise((r) => setTimeout(r, 1e3 * (attempt + 1)));
+      }
+    }
   }
+  return { tags: [] };
 }
 async function generateJsonLd(product, shopDomain) {
   const jsonLd = {
@@ -1053,7 +1082,7 @@ const loader$a = async ({ request }) => {
     planType: shop.planType
   };
 };
-const action$5 = async ({ request }) => {
+const action$6 = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -1481,7 +1510,7 @@ function GeneratePage() {
 }
 const route1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  action: action$5,
+  action: action$6,
   default: GeneratePage,
   loader: loader$a
 }, Symbol.toStringTag, { value: "Module" }));
@@ -1652,7 +1681,7 @@ const loader$9 = async ({ request }) => {
     totalProducts: products.length
   };
 };
-const action$4 = async ({ request }) => {
+const action$5 = async ({ request }) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -1669,10 +1698,13 @@ const action$4 = async ({ request }) => {
   return json({ success: false });
 };
 function ProductsPage() {
+  var _a;
   const { products, filter, totalProducts } = useLoaderData();
   const submit = useSubmit();
   const navigation = useNavigation();
-  const isSyncing = navigation.state !== "idle";
+  const isSyncing = navigation.state !== "idle" && ((_a = navigation.formData) == null ? void 0 : _a.get("intent")) === "sync";
+  const [toastActive, setToastActive] = useState(false);
+  const [toastContent, setToastContent] = useState("");
   const [selectedFilter, setSelectedFilter] = useState(filter);
   const handleFilterChange = useCallback(
     (value) => {
@@ -1689,120 +1721,169 @@ function ProductsPage() {
     submit(formData, { method: "post" });
   }, [submit]);
   const selectedResources = useIndexResourceState(products);
-  products.map((product, index) => {
-    const altStatus = product.missingAltCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "success", children: "Complete" }) : product.hasAltText ? /* @__PURE__ */ jsx(Badge, { tone: "warning", children: "Partial" }) : /* @__PURE__ */ jsx(Badge, { tone: "critical", children: "Missing" });
-    return [
-      /* @__PURE__ */ jsx(
-        Thumbnail,
+  const truncateTitle = (title, maxLen = 50) => {
+    if (title.length <= maxLen) return title;
+    return title.substring(0, maxLen) + "…";
+  };
+  const renderThumbnail = (src, alt) => {
+    if (!src) {
+      return /* @__PURE__ */ jsx(
+        Box,
         {
-          source: product.firstImage || "",
-          alt: product.title,
-          size: "small"
+          width: "40px",
+          height: "40px",
+          borderRadius: "100",
+          background: "bg-surface-secondary",
+          children: /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyXs", alignment: "center", tone: "subdued", children: "—" })
         }
-      ),
+      );
+    }
+    return /* @__PURE__ */ jsx(
+      Thumbnail,
+      {
+        source: src,
+        alt,
+        size: "small"
+      }
+    );
+  };
+  products.map((product) => {
+    const altStatus = product.imageCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "subdued", children: "No images" }) : product.missingAltCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "success", children: "Complete" }) : product.hasAltText ? /* @__PURE__ */ jsx(Badge, { tone: "warning", children: "Partial" }) : /* @__PURE__ */ jsx(Badge, { tone: "critical", children: "Missing" });
+    const imageCountDisplay = product.imageCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "subdued", children: "No images" }) : /* @__PURE__ */ jsx(Text, { as: "p", children: product.imageCount });
+    return [
+      renderThumbnail(product.firstImage, product.title),
       /* @__PURE__ */ jsxs("div", { children: [
-        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: product.title }),
+        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: truncateTitle(product.title) }),
         /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
           "/",
           product.handle
         ] })
       ] }),
-      product.imageCount,
+      imageCountDisplay,
       altStatus,
       product.hasJsonLd ? /* @__PURE__ */ jsx(Badge, { tone: "success", children: "Yes" }) : /* @__PURE__ */ jsx(Badge, { tone: "subdued", children: "No" })
     ];
   });
+  const toastMarkup = toastActive ? /* @__PURE__ */ jsx(Toast, { content: toastContent, onDismiss: () => setToastActive(false) }) : null;
   return /* @__PURE__ */ jsx(
     Page,
     {
       title: "Products",
       subtitle: `${totalProducts} products found`,
-      primaryAction: /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: handleSync, disabled: isSyncing, children: isSyncing ? "Syncing..." : "Sync from Shopify" }),
-      children: /* @__PURE__ */ jsx(Layout, { children: /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
-        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", children: [
-          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Product Inventory" }),
-          /* @__PURE__ */ jsx(InlineStack, { gap: "200", children: /* @__PURE__ */ jsx(
-            Select,
+      primaryAction: /* @__PURE__ */ jsx(
+        Button,
+        {
+          variant: "primary",
+          onClick: handleSync,
+          disabled: isSyncing,
+          loading: isSyncing,
+          children: isSyncing ? "Syncing…" : "Sync from Shopify"
+        }
+      ),
+      children: /* @__PURE__ */ jsxs(Frame, { children: [
+        toastMarkup,
+        /* @__PURE__ */ jsx(Layout, { children: /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+          /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", children: [
+            /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Product Inventory" }),
+            /* @__PURE__ */ jsx(InlineStack, { gap: "200", children: /* @__PURE__ */ jsx(
+              Select,
+              {
+                label: "",
+                labelInline: true,
+                options: [
+                  { label: "All Products", value: "all" },
+                  { label: "Missing Alt Text", value: "missing_alt" },
+                  { label: "Has Alt Text", value: "has_alt" },
+                  { label: "Has Tags", value: "has_tags" },
+                  { label: "Has JSON-LD", value: "has_jsonld" }
+                ],
+                value: selectedFilter,
+                onChange: handleFilterChange
+              }
+            ) })
+          ] }),
+          isSyncing ? /* @__PURE__ */ jsx(BlockStack, { gap: "300", children: Array.from({ length: 5 }).map((_, i) => /* @__PURE__ */ jsxs(InlineStack, { gap: "200", blockAlign: "center", children: [
+            /* @__PURE__ */ jsx(Box, { width: "40px", height: "40px", borderRadius: "100", background: "bg-surface-secondary" }),
+            /* @__PURE__ */ jsx(Box, { flex: 1, children: /* @__PURE__ */ jsx(SkeletonBodyText, { lines: 1 }) }),
+            /* @__PURE__ */ jsx(Box, { width: "60px", children: /* @__PURE__ */ jsx(SkeletonBodyText, { lines: 1 }) })
+          ] }, i)) }) : products.length === 0 ? /* @__PURE__ */ jsx(
+            EmptyState,
             {
-              label: "",
-              labelInline: true,
-              options: [
-                { label: "All Products", value: "all" },
-                { label: "Missing Alt Text", value: "missing_alt" },
-                { label: "Has Alt Text", value: "has_alt" },
-                { label: "Has Tags", value: "has_tags" },
-                { label: "Has JSON-LD", value: "has_jsonld" }
-              ],
-              value: selectedFilter,
-              onChange: handleFilterChange
+              heading: "No products found",
+              action: {
+                content: "Sync from Shopify",
+                onAction: handleSync
+              },
+              children: /* @__PURE__ */ jsx(Text, { as: "p", children: "Sync your products from Shopify to start optimizing alt text." })
             }
-          ) })
-        ] }),
-        products.length === 0 ? /* @__PURE__ */ jsx(
-          EmptyState,
-          {
-            heading: "No products found",
-            action: {
-              content: "Sync from Shopify",
-              onAction: handleSync
-            },
-            children: /* @__PURE__ */ jsx(Text, { as: "p", children: "Sync your products from Shopify to start optimizing alt text." })
-          }
-        ) : /* @__PURE__ */ jsx(
-          IndexTable,
-          {
-            resourceName: { singular: "product", plural: "products" },
-            itemCount: products.length,
-            selectedItemsCount: selectedResources.selectedItemsCount === "All" ? "All" : selectedResources.selectedResources.length,
-            headings: [
-              { title: "Image" },
-              { title: "Product" },
-              { title: "Images" },
-              { title: "Alt Status" },
-              { title: "JSON-LD" }
-            ],
-            ...selectedResources,
-            children: products.map((product, index) => {
-              const altStatus = product.missingAltCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "success", children: "Complete" }) : product.hasAltText ? /* @__PURE__ */ jsx(Badge, { tone: "warning", children: "Partial" }) : /* @__PURE__ */ jsx(Badge, { tone: "critical", children: "Missing" });
-              return /* @__PURE__ */ jsxs(
-                IndexTable.Row,
-                {
-                  id: String(product.id),
-                  selected: selectedResources.selectedResources.includes(String(product.id)),
-                  position: index,
-                  children: [
-                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
-                      Thumbnail,
-                      {
-                        source: product.firstImage || "",
-                        alt: product.title,
-                        size: "small"
-                      }
-                    ) }),
-                    /* @__PURE__ */ jsxs(IndexTable.Cell, { children: [
-                      /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: product.title }),
-                      /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-                        "/",
-                        product.handle
-                      ] })
-                    ] }),
-                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(Text, { as: "p", children: product.imageCount }) }),
-                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: altStatus }),
-                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: product.hasJsonLd ? /* @__PURE__ */ jsx(Badge, { tone: "success", children: "Yes" }) : /* @__PURE__ */ jsx(Badge, { tone: "subdued", children: "No" }) })
-                  ]
-                },
-                product.id
-              );
-            })
-          }
-        )
-      ] }) }) }) })
+          ) : /* @__PURE__ */ jsx(
+            IndexTable,
+            {
+              resourceName: { singular: "product", plural: "products" },
+              itemCount: products.length,
+              selectedItemsCount: selectedResources.selectedItemsCount === "All" ? "All" : selectedResources.selectedResources.length,
+              headings: [
+                { title: "Image" },
+                { title: "Product" },
+                { title: "Images" },
+                { title: "Alt Status" },
+                { title: "JSON-LD" }
+              ],
+              ...selectedResources,
+              children: products.map((product, index) => {
+                const altStatus = product.imageCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "subdued", children: "No images" }) : product.missingAltCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "success", children: "Complete" }) : product.hasAltText ? /* @__PURE__ */ jsx(Badge, { tone: "warning", children: "Partial" }) : /* @__PURE__ */ jsx(Badge, { tone: "critical", children: "Missing" });
+                return /* @__PURE__ */ jsxs(
+                  IndexTable.Row,
+                  {
+                    id: String(product.id),
+                    selected: selectedResources.selectedResources.includes(String(product.id)),
+                    position: index,
+                    children: [
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: product.firstImage ? /* @__PURE__ */ jsx(
+                        Thumbnail,
+                        {
+                          source: product.firstImage,
+                          alt: product.title,
+                          size: "small"
+                        }
+                      ) : /* @__PURE__ */ jsx(
+                        Box,
+                        {
+                          width: "40px",
+                          height: "40px",
+                          borderRadius: "100",
+                          background: "bg-surface-secondary",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          children: /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyXs", tone: "subdued", alignment: "center", children: "—" })
+                        }
+                      ) }),
+                      /* @__PURE__ */ jsxs(IndexTable.Cell, { children: [
+                        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: truncateTitle(product.title) }),
+                        /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+                          "/",
+                          product.handle
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: product.imageCount === 0 ? /* @__PURE__ */ jsx(Badge, { tone: "subdued", children: "No images" }) : /* @__PURE__ */ jsx(Text, { as: "p", children: product.imageCount }) }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: altStatus }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: product.hasJsonLd ? /* @__PURE__ */ jsx(Badge, { tone: "success", children: "Yes" }) : /* @__PURE__ */ jsx(Badge, { tone: "subdued", children: "No" }) })
+                    ]
+                  },
+                  product.id
+                );
+              })
+            }
+          )
+        ] }) }) }) })
+      ] })
     }
   );
 }
 const route2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  action: action$4,
+  action: action$5,
   default: ProductsPage,
   loader: loader$9
 }, Symbol.toStringTag, { value: "Module" }));
@@ -1831,7 +1912,7 @@ const loader$8 = async ({ request }) => {
     }))
   };
 };
-const action$3 = async ({ request }) => {
+const action$4 = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -2078,7 +2159,7 @@ function SettingsPage() {
 }
 const route3 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  action: action$3,
+  action: action$4,
   default: SettingsPage,
   loader: loader$8
 }, Symbol.toStringTag, { value: "Module" }));
@@ -2095,6 +2176,7 @@ const loader$7 = async ({ request }) => {
     getCurrentUsage(shop.id)
   ]);
   const isNewUser = stats.totalProducts === 0;
+  const showOnboarding = isNewUser || shop.onboardingStep !== "completed";
   const needsReview = stats.imagesPending > 0;
   const hasAiGenerated = stats.imagesWithAi > 0;
   return {
@@ -2102,224 +2184,342 @@ const loader$7 = async ({ request }) => {
     usage,
     shopDomain: session.shop,
     planType: shop.planType,
-    isNewUser,
+    showOnboarding,
+    onboardingStep: shop.onboardingStep || "welcome",
     needsReview,
     hasAiGenerated,
     imagesWithoutAlt: stats.totalImages - stats.imagesWithAlt
   };
 };
+const action$3 = async ({ request }) => {
+  const { session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+  if (intent === "dismiss_onboarding") {
+    await prisma.shop.update({
+      where: { shopDomain: session.shop },
+      data: { onboardingStep: "completed" }
+    });
+    return json({ success: true });
+  }
+  if (intent === "advance_onboarding") {
+    const step = String(formData.get("step") || "welcome");
+    await prisma.shop.update({
+      where: { shopDomain: session.shop },
+      data: { onboardingStep: step }
+    });
+    return json({ success: true });
+  }
+  return json({ success: false });
+};
 function DashboardIndex() {
-  const { stats, usage, shopDomain, planType, isNewUser, needsReview, hasAiGenerated, imagesWithoutAlt } = useLoaderData();
+  const {
+    stats,
+    usage,
+    shopDomain,
+    planType,
+    showOnboarding,
+    onboardingStep,
+    needsReview,
+    hasAiGenerated,
+    imagesWithoutAlt
+  } = useLoaderData();
   const navigate = useNavigate();
+  const submit = useSubmit();
+  useNavigation();
+  const [onboardingOpen, setOnboardingOpen] = useState(showOnboarding);
   const quotaWarning = usage.percentage >= 80;
   const quotaCritical = usage.percentage >= 95;
   const altTextCoverage = stats.totalImages > 0 ? Math.round(stats.imagesWithAlt / stats.totalImages * 100) : 0;
-  return /* @__PURE__ */ jsx(Page, { title: "Dashboard", subtitle: `Connected to ${shopDomain}`, children: /* @__PURE__ */ jsxs(Layout, { children: [
-    quotaWarning && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
-      Banner,
-      {
-        title: quotaCritical ? "Quota almost exhausted — upgrade to continue generating" : `Approaching your ${usage.planName} plan limit`,
-        tone: quotaCritical ? "critical" : "warning",
-        action: {
-          content: "Upgrade Plan",
-          url: "/app/settings"
-        },
-        children: /* @__PURE__ */ jsxs(Text, { as: "p", children: [
-          "You've used ",
-          usage.percentage,
-          "% of your monthly quota (",
-          usage.imagesGenerated,
-          "/",
-          usage.quota,
-          " images).",
-          quotaCritical && " Upgrade to avoid interruptions."
-        ] })
-      }
-    ) }),
-    isNewUser && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
-      Banner,
-      {
-        title: "Welcome to AltOptimizer!",
-        tone: "info",
-        children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-          /* @__PURE__ */ jsx(Text, { as: "p", children: "Get started in 3 simple steps:" }),
-          /* @__PURE__ */ jsxs(List, { type: "number", children: [
+  const dismissOnboarding = useCallback(() => {
+    setOnboardingOpen(false);
+    const formData = new FormData();
+    formData.set("intent", "dismiss_onboarding");
+    submit(formData, { method: "post" });
+  }, [submit]);
+  const advanceOnboarding = useCallback((step) => {
+    const formData = new FormData();
+    formData.set("intent", "advance_onboarding");
+    formData.set("step", step);
+    submit(formData, { method: "post" });
+  }, [submit]);
+  const onboardingModal = /* @__PURE__ */ jsx(
+    Modal,
+    {
+      open: onboardingOpen,
+      onClose: dismissOnboarding,
+      title: "",
+      large: true,
+      titleHidden: true,
+      children: /* @__PURE__ */ jsxs(Modal.Section, { children: [
+        onboardingStep === "welcome" && /* @__PURE__ */ jsxs(BlockStack, { gap: "400", align: "center", children: [
+          /* @__PURE__ */ jsx(Box$1, { paddingBlockStart: "400", children: /* @__PURE__ */ jsx(Icon, { source: CheckCircleIcon, tone: "success" }) }),
+          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingXl", alignment: "center", children: "Welcome to AltOptimizer! 🚀" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyLg", alignment: "center", tone: "subdued", children: "Supercharge your Shopify store's SEO with AI-powered product image optimization" }),
+          /* @__PURE__ */ jsx(BlockStack, { gap: "300", children: /* @__PURE__ */ jsxs(List, { type: "bullet", children: [
             /* @__PURE__ */ jsxs(List.Item, { children: [
-              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Sync your products" }),
-              " — Import all products from your Shopify store"
+              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "AI Alt Text Generation" }),
+              " — GPT-4o analyzes your product images and generates SEO-optimized alt text under 125 characters"
             ] }),
             /* @__PURE__ */ jsxs(List.Item, { children: [
-              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Generate AI alt text" }),
-              " — Let GPT-4o analyze your product images and suggest SEO-optimized alt text"
+              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Smart Product Tags" }),
+              " — Automatically generate relevant tags based on image content, product title, and description"
             ] }),
             /* @__PURE__ */ jsxs(List.Item, { children: [
-              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Review & apply" }),
-              " — Review suggestions, edit if needed, and apply with one click"
+              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "JSON-LD Structured Data" }),
+              " — Boost search visibility with Schema.org Product markup for every item"
             ] })
-          ] }),
-          /* @__PURE__ */ jsxs(InlineStack, { gap: "200", wrap: false, children: [
-            /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => navigate("/app/products"), children: "Sync Products Now" }),
-            /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/generate"), children: "Generate Alt Text" })
-          ] })
-        ] })
-      }
-    ) }),
-    needsReview && !isNewUser && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
-      Banner,
-      {
-        title: `${stats.imagesPending} images pending review`,
-        tone: "info",
-        action: {
-          content: "Review Now",
-          url: "/app/review"
-        },
-        children: /* @__PURE__ */ jsx(Text, { as: "p", children: "AI-generated alt text is ready for your review. Review and apply to optimize your store's SEO." })
-      }
-    ) }),
-    /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsxs(Grid, { columns: { xs: 1, sm: 2, md: 4, lg: 4, xl: 4 }, children: [
-      /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Total Products" }),
-        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalProducts }),
-        /* @__PURE__ */ jsx(Box, { minHeight: "20px", children: stats.totalProducts > 0 && /* @__PURE__ */ jsx(Button, { variant: "plain", size: "slim", onClick: () => navigate("/app/products"), children: "View all" }) })
-      ] }) }) }),
-      /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Total Images" }),
-        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalImages }),
-        /* @__PURE__ */ jsx(Box, { minHeight: "20px", children: imagesWithoutAlt > 0 && /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "critical", children: [
-          imagesWithoutAlt,
-          " without alt text"
-        ] }) })
-      ] }) }) }),
-      /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Alt Text Coverage" }),
-        /* @__PURE__ */ jsxs(InlineStack, { gap: "200", blockAlign: "center", children: [
-          /* @__PURE__ */ jsxs(Text, { as: "h1", variant: "heading2xl", children: [
-            altTextCoverage,
-            "%"
-          ] }),
-          /* @__PURE__ */ jsx(Badge, { tone: altTextCoverage >= 80 ? "success" : altTextCoverage >= 50 ? "warning" : "critical", children: altTextCoverage >= 80 ? "Good" : altTextCoverage >= 50 ? "Fair" : "Needs work" })
-        ] }),
-        /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-          stats.imagesWithAlt,
-          " of ",
-          stats.totalImages,
-          " images have alt text"
-        ] })
-      ] }) }) }),
-      /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "AI Generated" }),
-        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.imagesWithAi }),
-        /* @__PURE__ */ jsx(Box, { minHeight: "20px", children: stats.imagesPending > 0 && /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "info", children: [
-          stats.imagesPending,
-          " pending review"
-        ] }) })
-      ] }) }) })
-    ] }) }),
-    /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
-      /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-        /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "AI Generation Usage" }),
-        /* @__PURE__ */ jsx(Badge, { children: usage.planName })
-      ] }),
-      /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Monthly Usage" }),
-          /* @__PURE__ */ jsxs(Badge, { tone: quotaCritical ? "critical" : quotaWarning ? "warning" : "success", children: [
-            usage.imagesGenerated,
-            " / ",
-            usage.quota
+          ] }) }),
+          /* @__PURE__ */ jsxs(InlineStack, { gap: "200", children: [
+            /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => {
+              advanceOnboarding("sync");
+            }, children: "Get Started →" }),
+            /* @__PURE__ */ jsx(Button, { onClick: dismissOnboarding, children: "Skip" })
           ] })
         ] }),
-        /* @__PURE__ */ jsx(
-          ProgressBar,
-          {
-            progress: Math.min(usage.percentage, 100) / 100,
-            tone: quotaCritical ? "critical" : quotaWarning ? "warning" : "success"
-          }
-        ),
-        /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-          usage.quota - usage.imagesGenerated,
-          " generations remaining this month"
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "AI-Generated Alt Texts" }),
-          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: stats.imagesWithAi })
-        ] }),
-        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Pending Review" }),
-          /* @__PURE__ */ jsx(Badge, { tone: stats.imagesPending > 0 ? "info" : "success", children: stats.imagesPending > 0 ? `${stats.imagesPending} pending` : "All reviewed" })
-        ] }),
-        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Alt Text Coverage" }),
-          /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: [
-            altTextCoverage,
-            "%"
-          ] })
-        ] })
-      ] })
-    ] }) }) }),
-    /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
-      /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Quick Actions" }),
-      /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsxs(ButtonGroup, { fullWidth: true, children: [
-          /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/products"), variant: "primary", children: "Sync & View Products" }),
-          /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/generate"), children: "Generate Alt Text" })
-        ] }),
-        /* @__PURE__ */ jsxs(ButtonGroup, { fullWidth: true, children: [
-          /* @__PURE__ */ jsxs(Button, { onClick: () => navigate("/app/review"), disabled: !hasAiGenerated, children: [
-            "Review Suggestions",
-            !hasAiGenerated && " (no suggestions yet)"
-          ] }),
-          /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/backup"), children: "Backup Data" })
-        ] })
-      ] })
-    ] }) }) }),
-    /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "300", children: [
-      /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", children: [
-        /* @__PURE__ */ jsxs(BlockStack, { gap: "100", children: [
-          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Current Plan" }),
-          /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-            usage.planName,
-            " — ",
-            usage.quota,
-            " image generations per month"
-          ] })
-        ] }),
-        /* @__PURE__ */ jsx(Badge, { tone: "info", children: usage.planName })
-      ] }),
-      planType === "free" && /* @__PURE__ */ jsx(
-        Box,
-        {
-          padding: "300",
-          borderRadius: "200",
-          background: "bg-surface-secondary",
-          children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: "Upgrade to unlock more generations" }),
+        onboardingStep === "sync" && /* @__PURE__ */ jsxs(BlockStack, { gap: "400", align: "center", children: [
+          /* @__PURE__ */ jsx(Box$1, { paddingBlockStart: "400", children: /* @__PURE__ */ jsx(Icon, { source: CheckCircleIcon, tone: "info" }) }),
+          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingXl", alignment: "center", children: "Sync Your Products" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyLg", alignment: "center", tone: "subdued", children: "Import all products from your Shopify store to get started. We'll pull in product images, titles, and descriptions." }),
+          /* @__PURE__ */ jsx(Box$1, { padding: "400", borderRadius: "200", background: "bg-surface-secondary", width: "100%", children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: "What gets synced:" }),
             /* @__PURE__ */ jsxs(List, { type: "bullet", children: [
-              /* @__PURE__ */ jsxs(List.Item, { children: [
-                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Starter ($9/mo):" }),
-                " 300 images/month — perfect for small shops"
-              ] }),
-              /* @__PURE__ */ jsxs(List.Item, { children: [
-                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Professional ($19/mo):" }),
-                " 1,000 images/month for growing stores"
-              ] }),
-              /* @__PURE__ */ jsxs(List.Item, { children: [
-                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Business ($49/mo):" }),
-                " 5,000 images/month for large catalogs"
-              ] })
-            ] }),
-            /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => navigate("/app/settings"), children: "Upgrade Plan" })
+              /* @__PURE__ */ jsx(List.Item, { children: "All product images with existing alt text" }),
+              /* @__PURE__ */ jsx(List.Item, { children: "Product titles, handles, and descriptions" }),
+              /* @__PURE__ */ jsx(List.Item, { children: "Vendor, price, SKU, and currency information" })
+            ] })
+          ] }) }),
+          /* @__PURE__ */ jsxs(InlineStack, { gap: "200", children: [
+            /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => {
+              advanceOnboarding("generate");
+              navigate("/app/products");
+            }, children: "Sync Products Now" }),
+            /* @__PURE__ */ jsx(Button, { onClick: () => {
+              advanceOnboarding("generate");
+            }, children: "Skip, I'll do it later" })
+          ] })
+        ] }),
+        onboardingStep === "generate" && /* @__PURE__ */ jsxs(BlockStack, { gap: "400", align: "center", children: [
+          /* @__PURE__ */ jsx(Box$1, { paddingBlockStart: "400", children: /* @__PURE__ */ jsx(Icon, { source: CheckCircleIcon, tone: "success" }) }),
+          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingXl", alignment: "center", children: "Generate AI Alt Text" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyLg", alignment: "center", tone: "subdued", children: "One click is all it takes. GPT-4o analyzes each product image and generates SEO-optimized alt text, relevant tags, and JSON-LD structured data." }),
+          /* @__PURE__ */ jsx(Box$1, { padding: "400", borderRadius: "200", background: "bg-surface-secondary", width: "100%", children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: "What you'll get:" }),
+            /* @__PURE__ */ jsxs(List, { type: "bullet", children: [
+              /* @__PURE__ */ jsx(List.Item, { children: "SEO-optimized alt text (under 125 characters)" }),
+              /* @__PURE__ */ jsx(List.Item, { children: "Relevant product tags for discoverability" }),
+              /* @__PURE__ */ jsx(List.Item, { children: "JSON-LD structured data for rich snippets" })
+            ] })
+          ] }) }),
+          /* @__PURE__ */ jsxs(InlineStack, { gap: "200", children: [
+            /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => {
+              dismissOnboarding();
+              navigate("/app/generate");
+            }, children: "Generate Alt Text" }),
+            /* @__PURE__ */ jsx(Button, { onClick: dismissOnboarding, children: "Done — take me to dashboard" })
+          ] })
+        ] })
+      ] })
+    }
+  );
+  return /* @__PURE__ */ jsxs(Page, { title: "Dashboard", subtitle: `Connected to ${shopDomain}`, children: [
+    onboardingModal,
+    /* @__PURE__ */ jsxs(Layout, { children: [
+      quotaWarning && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
+        Banner,
+        {
+          title: quotaCritical ? "Quota almost exhausted — upgrade to continue generating" : `Approaching your ${usage.planName} plan limit`,
+          tone: quotaCritical ? "critical" : "warning",
+          action: {
+            content: "Upgrade Plan",
+            url: "/app/settings"
+          },
+          children: /* @__PURE__ */ jsxs(Text, { as: "p", children: [
+            "You've used ",
+            usage.percentage,
+            "% of your monthly quota (",
+            usage.imagesGenerated,
+            "/",
+            usage.quota,
+            " images).",
+            quotaCritical && " Upgrade to avoid interruptions."
           ] })
         }
-      ),
-      planType !== "free" && /* @__PURE__ */ jsx(Box, { children: /* @__PURE__ */ jsx(Button, { variant: "plain", onClick: () => navigate("/app/settings"), children: "Manage Plan" }) })
-    ] }) }) })
-  ] }) });
+      ) }),
+      stats.totalProducts === 0 && !onboardingOpen && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
+        Banner,
+        {
+          title: "Welcome to AltOptimizer!",
+          tone: "info",
+          children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", children: "Get started in 3 simple steps:" }),
+            /* @__PURE__ */ jsxs(List, { type: "number", children: [
+              /* @__PURE__ */ jsxs(List.Item, { children: [
+                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Sync your products" }),
+                " — Import all products from your Shopify store"
+              ] }),
+              /* @__PURE__ */ jsxs(List.Item, { children: [
+                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Generate AI alt text" }),
+                " — Let GPT-4o analyze your product images and suggest SEO-optimized alt text"
+              ] }),
+              /* @__PURE__ */ jsxs(List.Item, { children: [
+                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Review & apply" }),
+                " — Review suggestions, edit if needed, and apply with one click"
+              ] })
+            ] }),
+            /* @__PURE__ */ jsxs(InlineStack, { gap: "200", wrap: false, children: [
+              /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => navigate("/app/products"), children: "Sync Products Now" }),
+              /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/generate"), children: "Generate Alt Text" })
+            ] })
+          ] })
+        }
+      ) }),
+      needsReview && stats.totalProducts > 0 && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
+        Banner,
+        {
+          title: `${stats.imagesPending} images pending review`,
+          tone: "info",
+          action: {
+            content: "Review Now",
+            url: "/app/review"
+          },
+          children: /* @__PURE__ */ jsx(Text, { as: "p", children: "AI-generated alt text is ready for your review. Review and apply to optimize your store's SEO." })
+        }
+      ) }),
+      /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsxs(Grid, { columns: { xs: 1, sm: 2, md: 4, lg: 4, xl: 4 }, children: [
+        /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Total Products" }),
+          /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalProducts }),
+          /* @__PURE__ */ jsx(Box$1, { minHeight: "20px", children: stats.totalProducts > 0 && /* @__PURE__ */ jsx(Button, { variant: "plain", size: "slim", onClick: () => navigate("/app/products"), children: "View all" }) })
+        ] }) }) }),
+        /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Total Images" }),
+          /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalImages }),
+          /* @__PURE__ */ jsx(Box$1, { minHeight: "20px", children: imagesWithoutAlt > 0 ? /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "critical", children: [
+            imagesWithoutAlt,
+            " without alt text"
+          ] }) : stats.totalImages > 0 ? /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "success", children: "All images have alt text" }) : null })
+        ] }) }) }),
+        /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Alt Text Coverage" }),
+          /* @__PURE__ */ jsxs(InlineStack, { gap: "200", blockAlign: "center", children: [
+            /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalImages > 0 ? `${altTextCoverage}%` : "—" }),
+            stats.totalImages > 0 && /* @__PURE__ */ jsx(Badge, { tone: altTextCoverage >= 80 ? "success" : altTextCoverage >= 50 ? "warning" : "critical", children: altTextCoverage >= 80 ? "Good" : altTextCoverage >= 50 ? "Fair" : "Needs work" })
+          ] }),
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: stats.totalImages > 0 ? `${stats.imagesWithAlt} of ${stats.totalImages} images have alt text` : "No images synced yet" })
+        ] }) }) }),
+        /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "AI Generated" }),
+          /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.imagesWithAi }),
+          /* @__PURE__ */ jsx(Box$1, { minHeight: "20px", children: stats.imagesPending > 0 ? /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "info", children: [
+            stats.imagesPending,
+            " pending review"
+          ] }) : stats.imagesWithAi > 0 ? /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "success", children: "All reviewed" }) : /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "No generations yet" }) })
+        ] }) }) })
+      ] }) }),
+      /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "AI Generation Usage" }),
+          /* @__PURE__ */ jsx(Badge, { children: usage.planName })
+        ] }),
+        /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Monthly Usage" }),
+            /* @__PURE__ */ jsxs(Badge, { tone: quotaCritical ? "critical" : quotaWarning ? "warning" : "success", children: [
+              usage.imagesGenerated,
+              " / ",
+              usage.quota
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx(
+            ProgressBar,
+            {
+              progress: Math.min(usage.percentage, 100) / 100,
+              tone: quotaCritical ? "critical" : quotaWarning ? "warning" : "success"
+            }
+          ),
+          /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+            usage.quota - usage.imagesGenerated,
+            " generations remaining this month"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "AI-Generated Alt Texts" }),
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: stats.imagesWithAi })
+          ] }),
+          /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Pending Review" }),
+            /* @__PURE__ */ jsx(Badge, { tone: stats.imagesPending > 0 ? "info" : "success", children: stats.imagesPending > 0 ? `${stats.imagesPending} pending` : "All reviewed" })
+          ] }),
+          /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Alt Text Coverage" }),
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: stats.totalImages > 0 ? `${altTextCoverage}%` : "—" })
+          ] })
+        ] })
+      ] }) }) }),
+      /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+        /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Quick Actions" }),
+        /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsxs(ButtonGroup, { fullWidth: true, children: [
+            /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/products"), variant: "primary", children: "Sync & View Products" }),
+            /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/generate"), children: "Generate Alt Text" })
+          ] }),
+          /* @__PURE__ */ jsxs(ButtonGroup, { fullWidth: true, children: [
+            /* @__PURE__ */ jsxs(Button, { onClick: () => navigate("/app/review"), disabled: !hasAiGenerated, children: [
+              "Review Suggestions",
+              !hasAiGenerated && " (no suggestions yet)"
+            ] }),
+            /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/backup"), children: "Backup Data" })
+          ] })
+        ] })
+      ] }) }) }),
+      /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "300", children: [
+        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", children: [
+          /* @__PURE__ */ jsxs(BlockStack, { gap: "100", children: [
+            /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Current Plan" }),
+            /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+              usage.planName,
+              " — ",
+              usage.quota,
+              " image generations per month"
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx(Badge, { tone: "info", children: usage.planName })
+        ] }),
+        planType === "free" && /* @__PURE__ */ jsx(
+          Box$1,
+          {
+            padding: "300",
+            borderRadius: "200",
+            background: "bg-surface-secondary",
+            children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+              /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: "Upgrade to unlock more generations" }),
+              /* @__PURE__ */ jsxs(List, { type: "bullet", children: [
+                /* @__PURE__ */ jsxs(List.Item, { children: [
+                  /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Starter ($9/mo):" }),
+                  " 300 images/month — perfect for small shops"
+                ] }),
+                /* @__PURE__ */ jsxs(List.Item, { children: [
+                  /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Professional ($19/mo):" }),
+                  " 1,000 images/month for growing stores"
+                ] }),
+                /* @__PURE__ */ jsxs(List.Item, { children: [
+                  /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Business ($49/mo):" }),
+                  " 5,000 images/month for large catalogs"
+                ] })
+              ] }),
+              /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => navigate("/app/settings"), children: "Upgrade Plan" })
+            ] })
+          }
+        )
+      ] }) }) })
+    ] })
+  ] });
 }
 const route4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
+  action: action$3,
   default: DashboardIndex,
   loader: loader$7
 }, Symbol.toStringTag, { value: "Module" }));
@@ -3084,7 +3284,7 @@ function ReviewPage() {
                           /* @__PURE__ */ jsx(Button, { size: "slim", onClick: handleCancelEdit, children: "Cancel" })
                         ] })
                       ] }) : /* @__PURE__ */ jsx(
-                        Box,
+                        Box$1,
                         {
                           padding: "100",
                           background: "bg-surface-secondary",
@@ -3486,7 +3686,7 @@ const navItems = [
 function AppNav() {
   const location = useLocation();
   return /* @__PURE__ */ jsx(
-    Box,
+    Box$1,
     {
       padding: "300",
       borderColor: "border",
@@ -3524,9 +3724,25 @@ const loader = async ({ request }) => {
   return null;
 };
 function AppLayout() {
-  return /* @__PURE__ */ jsxs(Fragment, { children: [
+  return /* @__PURE__ */ jsxs(Box$1, { minHeight: "100vh", display: "flex", flexDirection: "column", children: [
     /* @__PURE__ */ jsx(AppNav, {}),
-    /* @__PURE__ */ jsx(Outlet, {})
+    /* @__PURE__ */ jsx(Box$1, { flex: 1, children: /* @__PURE__ */ jsx(Outlet, {}) }),
+    /* @__PURE__ */ jsx(
+      Box$1,
+      {
+        padding: "300",
+        borderBlockStart: "025",
+        background: "bg-surface-secondary",
+        children: /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", wrap: false, children: [
+          /* @__PURE__ */ jsxs(InlineStack, { gap: "400", wrap: false, children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "AltOptimizer v1.0.0" }),
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: /* @__PURE__ */ jsx(Link, { to: "/privacy", style: { textDecoration: "none" }, children: "Privacy Policy" }) }),
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: /* @__PURE__ */ jsx(Link, { to: "/terms", style: { textDecoration: "none" }, children: "Terms of Service" }) })
+          ] }),
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Support: support@altoptimizer.com" })
+        ] })
+      }
+    )
   ] });
 }
 function ErrorBoundary() {
@@ -3543,7 +3759,7 @@ const route11 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.definePrope
   headers,
   loader
 }, Symbol.toStringTag, { value: "Module" }));
-const serverManifest = { "entry": { "module": "/assets/entry.client-B51Dai5R.js", "imports": ["/assets/components-rJeHIEYM.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/root-DLr0lOEJ.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/context-D-fBfBGM.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Image-Co8BjUBj.js"], "css": [] }, "routes/app.generate": { "id": "routes/app.generate", "parentId": "routes/app", "path": "generate", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.generate-JLrLtO1p.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/constants-Bsaf0VJ5.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DeC7d8NS.js", "/assets/Modal-DY4Uwayc.js", "/assets/Banner-y7vQyT0k.js", "/assets/Layout-BL5dzI_I.js", "/assets/FormLayout-BIJvsp-0.js", "/assets/Select-DrokdBk4.js", "/assets/Thumbnail-BcvuYLa6.js", "/assets/List-C-BNCk4f.js", "/assets/context-D-fBfBGM.js", "/assets/CSSTransition-UjcMz1VZ.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js"], "css": [] }, "routes/app.products": { "id": "routes/app.products", "parentId": "routes/app", "path": "products", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.products-Bwa0EIDU.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DeC7d8NS.js", "/assets/Thumbnail-BcvuYLa6.js", "/assets/Layout-BL5dzI_I.js", "/assets/Select-DrokdBk4.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.settings": { "id": "routes/app.settings", "parentId": "routes/app", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.settings-CrdWpb0M.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/constants-Bsaf0VJ5.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/DataTable-Ce--qcN6.js", "/assets/FormLayout-BIJvsp-0.js", "/assets/Select-DrokdBk4.js", "/assets/ProgressBar-Ci4Kutd9.js", "/assets/Sticky-BN_WgG5a.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app._index-DDO2zAbR.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/List-C-BNCk4f.js", "/assets/ProgressBar-Ci4Kutd9.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.backup": { "id": "routes/app.backup", "parentId": "routes/app", "path": "backup", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.backup-CA-Us_Bh.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/EmptyState-DQeWehrP.js", "/assets/DataTable-Ce--qcN6.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js"], "css": [] }, "routes/app.review": { "id": "routes/app.review", "parentId": "routes/app", "path": "review", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.review-Dm7J4cmg.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/ProgressBar-Ci4Kutd9.js", "/assets/Modal-DY4Uwayc.js", "/assets/FormLayout-BIJvsp-0.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Thumbnail-BcvuYLa6.js", "/assets/CSSTransition-UjcMz1VZ.js", "/assets/context-D-fBfBGM.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js"], "css": [] }, "routes/webhooks": { "id": "routes/webhooks", "parentId": "root", "path": "webhooks", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/webhooks-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/privacy": { "id": "routes/privacy", "parentId": "root", "path": "privacy", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/privacy-D8M6O-c_.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js"], "css": [] }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/terms": { "id": "routes/terms", "parentId": "root", "path": "terms", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/terms-BucXud27.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js"], "css": [] }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/app-BEjHeXD5.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Image-Co8BjUBj.js"], "css": [] } }, "url": "/assets/manifest-aec2d8ff.js", "version": "aec2d8ff" };
+const serverManifest = { "entry": { "module": "/assets/entry.client-iT-EbqKB.js", "imports": ["/assets/components-DP6mLf4j.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/root-Bf7x-mWx.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/Page-CAtI6ImP.js", "/assets/context-B8MdE6Ma.js", "/assets/EmptyState-Duni_2QU.js", "/assets/Image-C-11cqQS.js"], "css": [] }, "routes/app.generate": { "id": "routes/app.generate", "parentId": "routes/app", "path": "generate", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.generate-DsIsshWI.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/constants-Bsaf0VJ5.js", "/assets/use-index-resource-state-CKjPN4oT.js", "/assets/Page-CAtI6ImP.js", "/assets/Modal-Drxzqmf6.js", "/assets/Banner-BHD7uOIW.js", "/assets/Layout-D_Jv5gGd.js", "/assets/FormLayout-nWS6wmRf.js", "/assets/Select-iXOOhk-e.js", "/assets/Thumbnail-vc0EQUdg.js", "/assets/List-BZsb-uP5.js", "/assets/context-B8MdE6Ma.js", "/assets/CSSTransition-DWW8YkE0.js", "/assets/Image-C-11cqQS.js", "/assets/Sticky-JXQRhMnx.js"], "css": [] }, "routes/app.products": { "id": "routes/app.products", "parentId": "routes/app", "path": "products", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.products-DSRJMxPg.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/use-index-resource-state-CKjPN4oT.js", "/assets/Page-CAtI6ImP.js", "/assets/Thumbnail-vc0EQUdg.js", "/assets/Modal-Drxzqmf6.js", "/assets/Image-C-11cqQS.js", "/assets/Layout-D_Jv5gGd.js", "/assets/index-CAaWPS8X.js", "/assets/CSSTransition-DWW8YkE0.js", "/assets/Select-iXOOhk-e.js", "/assets/EmptyState-Duni_2QU.js", "/assets/Sticky-JXQRhMnx.js", "/assets/context-B8MdE6Ma.js"], "css": [] }, "routes/app.settings": { "id": "routes/app.settings", "parentId": "routes/app", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.settings-Be7SJc98.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/constants-Bsaf0VJ5.js", "/assets/Page-CAtI6ImP.js", "/assets/Layout-D_Jv5gGd.js", "/assets/Banner-BHD7uOIW.js", "/assets/DataTable-uRktxyMF.js", "/assets/FormLayout-nWS6wmRf.js", "/assets/Select-iXOOhk-e.js", "/assets/ProgressBar-DOj1Xpf8.js", "/assets/index-CAaWPS8X.js", "/assets/Sticky-JXQRhMnx.js", "/assets/CSSTransition-DWW8YkE0.js"], "css": [] }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app._index-Dtp_Xgbw.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/Modal-Drxzqmf6.js", "/assets/Page-CAtI6ImP.js", "/assets/List-BZsb-uP5.js", "/assets/Layout-D_Jv5gGd.js", "/assets/Banner-BHD7uOIW.js", "/assets/ProgressBar-DOj1Xpf8.js", "/assets/context-B8MdE6Ma.js", "/assets/CSSTransition-DWW8YkE0.js"], "css": [] }, "routes/app.backup": { "id": "routes/app.backup", "parentId": "routes/app", "path": "backup", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.backup-CGmCxJJj.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/Page-CAtI6ImP.js", "/assets/Layout-D_Jv5gGd.js", "/assets/Banner-BHD7uOIW.js", "/assets/EmptyState-Duni_2QU.js", "/assets/DataTable-uRktxyMF.js", "/assets/Image-C-11cqQS.js", "/assets/index-CAaWPS8X.js", "/assets/Sticky-JXQRhMnx.js"], "css": [] }, "routes/app.review": { "id": "routes/app.review", "parentId": "routes/app", "path": "review", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.review-vfkbqZf9.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/Page-CAtI6ImP.js", "/assets/Layout-D_Jv5gGd.js", "/assets/Banner-BHD7uOIW.js", "/assets/ProgressBar-DOj1Xpf8.js", "/assets/Modal-Drxzqmf6.js", "/assets/FormLayout-nWS6wmRf.js", "/assets/EmptyState-Duni_2QU.js", "/assets/Thumbnail-vc0EQUdg.js", "/assets/CSSTransition-DWW8YkE0.js", "/assets/context-B8MdE6Ma.js", "/assets/Image-C-11cqQS.js", "/assets/Sticky-JXQRhMnx.js"], "css": [] }, "routes/webhooks": { "id": "routes/webhooks", "parentId": "root", "path": "webhooks", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/webhooks-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/privacy": { "id": "routes/privacy", "parentId": "root", "path": "privacy", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/privacy-BqQSm1hK.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/Page-CAtI6ImP.js"], "css": [] }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/terms": { "id": "routes/terms", "parentId": "root", "path": "terms", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/terms-CKEQRibZ.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/Page-CAtI6ImP.js"], "css": [] }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/app-UBN2G5JV.js", "imports": ["/assets/components-DP6mLf4j.js", "/assets/Page-CAtI6ImP.js", "/assets/EmptyState-Duni_2QU.js", "/assets/Image-C-11cqQS.js"], "css": [] } }, "url": "/assets/manifest-0eabd6d3.js", "version": "0eabd6d3" };
 const mode = "production";
 const assetsBuildDirectory = "build/client";
 const basename = "/";

@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
+import { json, useLoaderData, useNavigate, useSubmit, useNavigation } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -16,11 +16,15 @@ import {
   Box,
   EmptyState,
   List,
+  Modal,
+  Icon,
 } from "@shopify/polaris";
+import { CheckCircleIcon, AlertTriangleIcon } from "@shopify/polaris-icons";
 import { authenticate } from "~/shopify.server";
 import { getDashboardStats } from "~/services/sync.server";
 import { getCurrentUsage } from "~/services/billing.server";
 import prisma from "~/db.server";
+import { useState, useCallback } from "react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -38,6 +42,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const isNewUser = stats.totalProducts === 0;
+  const showOnboarding = isNewUser || shop.onboardingStep !== "completed";
   const needsReview = stats.imagesPending > 0;
   const hasAiGenerated = stats.imagesWithAi > 0;
 
@@ -46,25 +51,178 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     usage,
     shopDomain: session.shop,
     planType: shop.planType,
-    isNewUser,
+    showOnboarding,
+    onboardingStep: shop.onboardingStep || "welcome",
     needsReview,
     hasAiGenerated,
     imagesWithoutAlt: stats.totalImages - stats.imagesWithAlt,
   };
 };
 
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "dismiss_onboarding") {
+    await prisma.shop.update({
+      where: { shopDomain: session.shop },
+      data: { onboardingStep: "completed" },
+    });
+    return json({ success: true });
+  }
+
+  if (intent === "advance_onboarding") {
+    const step = String(formData.get("step") || "welcome");
+    await prisma.shop.update({
+      where: { shopDomain: session.shop },
+      data: { onboardingStep: step },
+    });
+    return json({ success: true });
+  }
+
+  return json({ success: false });
+};
+
 export default function DashboardIndex() {
-  const { stats, usage, shopDomain, planType, isNewUser, needsReview, hasAiGenerated, imagesWithoutAlt } =
-    useLoaderData<typeof loader>();
+  const {
+    stats, usage, shopDomain, planType, showOnboarding, onboardingStep,
+    needsReview, hasAiGenerated, imagesWithoutAlt,
+  } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const submit = useSubmit();
+  const navigation = useNavigation();
+
+  const [onboardingOpen, setOnboardingOpen] = useState(showOnboarding);
 
   const quotaWarning = usage.percentage >= 80;
   const quotaCritical = usage.percentage >= 95;
   const altTextCoverage =
     stats.totalImages > 0 ? Math.round((stats.imagesWithAlt / stats.totalImages) * 100) : 0;
 
+  const dismissOnboarding = useCallback(() => {
+    setOnboardingOpen(false);
+    const formData = new FormData();
+    formData.set("intent", "dismiss_onboarding");
+    submit(formData, { method: "post" });
+  }, [submit]);
+
+  const advanceOnboarding = useCallback((step: string) => {
+    const formData = new FormData();
+    formData.set("intent", "advance_onboarding");
+    formData.set("step", step);
+    submit(formData, { method: "post" });
+  }, [submit]);
+
+  const onboardingModal = (
+    <Modal
+      open={onboardingOpen}
+      onClose={dismissOnboarding}
+      title=""
+      large
+      titleHidden
+    >
+      <Modal.Section>
+        {onboardingStep === "welcome" && (
+          <BlockStack gap="400" align="center">
+            <Box paddingBlockStart="400">
+              <Icon source={CheckCircleIcon} tone="success" />
+            </Box>
+            <Text as="h2" variant="headingXl" alignment="center">
+              Welcome to AltOptimizer! 🚀
+            </Text>
+            <Text as="p" variant="bodyLg" alignment="center" tone="subdued">
+              Supercharge your Shopify store's SEO with AI-powered product image optimization
+            </Text>
+            <BlockStack gap="300">
+              <List type="bullet">
+                <List.Item>
+                  <Text as="span" fontWeight="semibold">AI Alt Text Generation</Text> — GPT-4o analyzes your product images and generates SEO-optimized alt text under 125 characters
+                </List.Item>
+                <List.Item>
+                  <Text as="span" fontWeight="semibold">Smart Product Tags</Text> — Automatically generate relevant tags based on image content, product title, and description
+                </List.Item>
+                <List.Item>
+                  <Text as="span" fontWeight="semibold">JSON-LD Structured Data</Text> — Boost search visibility with Schema.org Product markup for every item
+                </List.Item>
+              </List>
+            </BlockStack>
+            <InlineStack gap="200">
+              <Button variant="primary" onClick={() => { advanceOnboarding("sync"); }}>
+                Get Started →
+              </Button>
+              <Button onClick={dismissOnboarding}>Skip</Button>
+            </InlineStack>
+          </BlockStack>
+        )}
+
+        {onboardingStep === "sync" && (
+          <BlockStack gap="400" align="center">
+            <Box paddingBlockStart="400">
+              <Icon source={CheckCircleIcon} tone="info" />
+            </Box>
+            <Text as="h2" variant="headingXl" alignment="center">
+              Sync Your Products
+            </Text>
+            <Text as="p" variant="bodyLg" alignment="center" tone="subdued">
+              Import all products from your Shopify store to get started. We'll pull in product images, titles, and descriptions.
+            </Text>
+            <Box padding="400" borderRadius="200" background="bg-surface-secondary" width="100%">
+              <BlockStack gap="200">
+                <Text as="p" variant="bodyMd" fontWeight="semibold">What gets synced:</Text>
+                <List type="bullet">
+                  <List.Item>All product images with existing alt text</List.Item>
+                  <List.Item>Product titles, handles, and descriptions</List.Item>
+                  <List.Item>Vendor, price, SKU, and currency information</List.Item>
+                </List>
+              </BlockStack>
+            </Box>
+            <InlineStack gap="200">
+              <Button variant="primary" onClick={() => { advanceOnboarding("generate"); navigate("/app/products"); }}>
+                Sync Products Now
+              </Button>
+              <Button onClick={() => { advanceOnboarding("generate"); }}>Skip, I'll do it later</Button>
+            </InlineStack>
+          </BlockStack>
+        )}
+
+        {onboardingStep === "generate" && (
+          <BlockStack gap="400" align="center">
+            <Box paddingBlockStart="400">
+              <Icon source={CheckCircleIcon} tone="success" />
+            </Box>
+            <Text as="h2" variant="headingXl" alignment="center">
+              Generate AI Alt Text
+            </Text>
+            <Text as="p" variant="bodyLg" alignment="center" tone="subdued">
+              One click is all it takes. GPT-4o analyzes each product image and generates SEO-optimized alt text, relevant tags, and JSON-LD structured data.
+            </Text>
+            <Box padding="400" borderRadius="200" background="bg-surface-secondary" width="100%">
+              <BlockStack gap="200">
+                <Text as="p" variant="bodyMd" fontWeight="semibold">What you'll get:</Text>
+                <List type="bullet">
+                  <List.Item>SEO-optimized alt text (under 125 characters)</List.Item>
+                  <List.Item>Relevant product tags for discoverability</List.Item>
+                  <List.Item>JSON-LD structured data for rich snippets</List.Item>
+                </List>
+              </BlockStack>
+            </Box>
+            <InlineStack gap="200">
+              <Button variant="primary" onClick={() => { dismissOnboarding(); navigate("/app/generate"); }}>
+                Generate Alt Text
+              </Button>
+              <Button onClick={dismissOnboarding}>Done — take me to dashboard</Button>
+            </InlineStack>
+          </BlockStack>
+        )}
+      </Modal.Section>
+    </Modal>
+  );
+
   return (
     <Page title="Dashboard" subtitle={`Connected to ${shopDomain}`}>
+      {onboardingModal}
+
       <Layout>
         {/* Quota Warning Banner */}
         {quotaWarning && (
@@ -89,8 +247,8 @@ export default function DashboardIndex() {
           </Layout.Section>
         )}
 
-        {/* Quick-Start Guide for New Users */}
-        {isNewUser && (
+        {/* Quick-Start Guide for New Users (non-modal) */}
+        {stats.totalProducts === 0 && !onboardingOpen && (
           <Layout.Section>
             <Banner
               title="Welcome to AltOptimizer!"
@@ -123,7 +281,7 @@ export default function DashboardIndex() {
         )}
 
         {/* Needs Review Banner */}
-        {needsReview && !isNewUser && (
+        {needsReview && stats.totalProducts > 0 && (
           <Layout.Section>
             <Banner
               title={`${stats.imagesPending} images pending review`}
@@ -172,11 +330,15 @@ export default function DashboardIndex() {
                     {stats.totalImages}
                   </Text>
                   <Box minHeight="20px">
-                    {imagesWithoutAlt > 0 && (
+                    {imagesWithoutAlt > 0 ? (
                       <Text as="p" variant="bodySm" tone="critical">
                         {imagesWithoutAlt} without alt text
                       </Text>
-                    )}
+                    ) : stats.totalImages > 0 ? (
+                      <Text as="p" variant="bodySm" tone="success">
+                        All images have alt text
+                      </Text>
+                    ) : null}
                   </Box>
                 </BlockStack>
               </Card>
@@ -189,14 +351,18 @@ export default function DashboardIndex() {
                   </Text>
                   <InlineStack gap="200" blockAlign="center">
                     <Text as="h1" variant="heading2xl">
-                      {altTextCoverage}%
+                      {stats.totalImages > 0 ? `${altTextCoverage}%` : "—"}
                     </Text>
-                    <Badge tone={altTextCoverage >= 80 ? "success" : altTextCoverage >= 50 ? "warning" : "critical"}>
-                      {altTextCoverage >= 80 ? "Good" : altTextCoverage >= 50 ? "Fair" : "Needs work"}
-                    </Badge>
+                    {stats.totalImages > 0 && (
+                      <Badge tone={altTextCoverage >= 80 ? "success" : altTextCoverage >= 50 ? "warning" : "critical"}>
+                        {altTextCoverage >= 80 ? "Good" : altTextCoverage >= 50 ? "Fair" : "Needs work"}
+                      </Badge>
+                    )}
                   </InlineStack>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    {stats.imagesWithAlt} of {stats.totalImages} images have alt text
+                    {stats.totalImages > 0
+                      ? `${stats.imagesWithAlt} of ${stats.totalImages} images have alt text`
+                      : "No images synced yet"}
                   </Text>
                 </BlockStack>
               </Card>
@@ -211,9 +377,17 @@ export default function DashboardIndex() {
                     {stats.imagesWithAi}
                   </Text>
                   <Box minHeight="20px">
-                    {stats.imagesPending > 0 && (
+                    {stats.imagesPending > 0 ? (
                       <Text as="p" variant="bodySm" tone="info">
                         {stats.imagesPending} pending review
+                      </Text>
+                    ) : stats.imagesWithAi > 0 ? (
+                      <Text as="p" variant="bodySm" tone="success">
+                        All reviewed
+                      </Text>
+                    ) : (
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        No generations yet
                       </Text>
                     )}
                   </Box>
@@ -272,7 +446,7 @@ export default function DashboardIndex() {
                     Alt Text Coverage
                   </Text>
                   <Text as="p" variant="bodyMd" fontWeight="semibold">
-                    {altTextCoverage}%
+                    {stats.totalImages > 0 ? `${altTextCoverage}%` : "—"}
                   </Text>
                 </InlineStack>
               </BlockStack>
@@ -345,14 +519,6 @@ export default function DashboardIndex() {
                       Upgrade Plan
                     </Button>
                   </BlockStack>
-                </Box>
-              )}
-
-              {planType !== "free" && (
-                <Box>
-                  <Button variant="plain" onClick={() => navigate("/app/settings")}>
-                    Manage Plan
-                  </Button>
                 </Box>
               )}
             </BlockStack>

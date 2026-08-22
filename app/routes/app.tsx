@@ -20,10 +20,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export default function AppLayout() {
   return (
-    <>
+    <Box minHeight="100vh" display="flex" flexDirection="column">
       <AppNav />
-      <Outlet />
-    </>
+      <Box flex={1}>
+        <Outlet />
+      </Box>
+      {/* App Footer */}
+      <Box
+        padding="300"
+        borderBlockStart="025"
+        background="bg-surface-secondary"
+      >
+        <InlineStack align="space-between" blockAlign="center" wrap={false}>
+          <InlineStack gap="400" wrap={false}>
+            <Text as="p" variant="bodySm" tone="subdued">
+              AltOptimizer v1.0.0
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              <Link to="/privacy" style={{ textDecoration: "none" }}>
+                Privacy Policy
+              </Link>
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              <Link to="/terms" style={{ textDecoration: "none" }}>
+                Terms of Service
+              </Link>
+            </Text>
+          </InlineStack>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Support: support@altoptimizer.com
+          </Text>
+        </InlineStack>
+      </Box>
+    </Box>
   );
 }
 
