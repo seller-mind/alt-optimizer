@@ -13,16 +13,16 @@
     "studio": "prisma studio"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
     "@prisma/client": "^5.22.0",
     "@remix-run/node": "^2.15.0",
     "@remix-run/react": "^2.15.0",
     "@remix-run/serve": "^2.15.0",
     "@shopify/polaris": "^12.0.0",
-    "@shopify/shopify-app-remix": "^3.6.0",
     "@shopify/shopify-api": "^11.7.0",
+    "@shopify/shopify-app-remix": "^3.6.0",
     "@shopify/shopify-app-session-storage-prisma": "^4.0.0",
     "isbot": "^5.1.0",
+    "openai": "^7.5.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "vite-tsconfig-paths": "^4.3.0"

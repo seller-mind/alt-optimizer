@@ -1,6 +1,8 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || "",
+});
 
 interface ImageAnalysisResult {
   objects: string[];
@@ -18,32 +20,19 @@ interface TagsResult {
   tags: string[];
 }
 
-export async function analyzeImage(
-  imageBase64: string,
-  mimeType: string,
-  productTitle?: string,
-  locale: string = "en"
-): Promise<AltTextResult> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-  const localeInstruction = getLocaleInstruction(locale);
-
-  const prompt = `You are an SEO expert specializing in e-commerce product image optimization.
-Analyze this product image and generate SEO-optimized alt text.
-
-${productTitle ? `Product title: "${productTitle}"` : ""}
+const ALT_TEXT_SYSTEM_PROMPT = `You are an SEO expert specializing in e-commerce product image optimization.
+Analyze the product image and generate SEO-optimized alt text.
 
 Requirements:
 - Alt text must be under 125 characters
 - Describe the main product/object clearly
 - Include relevant visual details (color, material, style)
-- ${localeInstruction}
 - Be specific and descriptive for accessibility
 - Include key product attributes that help with SEO
 
-Respond in this exact JSON format:
+Respond in JSON format with:
 {
-  "altText": "the generated alt text",
+  "altText": "the generated alt text (under 125 chars)",
   "analysis": {
     "objects": ["list of detected objects"],
     "colors": ["detected colors"],
@@ -52,27 +41,61 @@ Respond in this exact JSON format:
   }
 }`;
 
-  const imagePart = {
-    inlineData: {
-      data: imageBase64,
-      mimeType,
-    },
-  };
+const TAGS_SYSTEM_PROMPT = `You are an e-commerce SEO expert. Generate relevant product tags based on the image, title, and description.
 
-  const result = await model.generateContent([prompt, imagePart]);
-  const response = result.response;
-  const text = response.text();
+Requirements:
+- Generate 5-10 relevant tags
+- Include product type, style, color, material, occasion
+- Tags should be lowercase, hyphenated phrases
+- Focus on discoverability and SEO value
+
+Respond in JSON format with:
+{
+  "tags": ["tag1", "tag2", "tag3"]
+}`;
+
+export async function analyzeImage(
+  imageBase64: string,
+  mimeType: string,
+  productTitle?: string,
+  locale: string = "en"
+): Promise<AltTextResult> {
+  const localeInstruction = getLocaleInstruction(locale);
+  const dataUrl = `data:${mimeType};base64,${imageBase64}`;
+
+  const userMessage = productTitle
+    ? `Product title: "${productTitle}"\n\n${localeInstruction}`
+    : localeInstruction;
 
   try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: ALT_TEXT_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: userMessage },
+            { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+          ],
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 500,
+    });
+
+    const text = response.choices[0]?.message?.content || "{}";
     const cleanedText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleanedText);
+
     return {
-      altText: parsed.altText || "",
+      altText: parsed.altText?.substring(0, 125) || "",
       analysis: parsed.analysis || { objects: [], colors: [], context: "", category: "" },
     };
-  } catch {
+  } catch (error) {
+    console.error("[OpenAI] analyzeImage error:", error);
     return {
-      altText: text.substring(0, 125),
+      altText: "",
       analysis: { objects: [], colors: [], context: "", category: "" },
     };
   }
@@ -85,43 +108,38 @@ export async function generateTags(
   productDescription: string,
   locale: string = "en"
 ): Promise<TagsResult> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
   const localeInstruction = getLocaleInstruction(locale);
+  const dataUrl = `data:${mimeType};base64,${imageBase64}`;
 
-  const prompt = `You are an e-commerce SEO expert. Generate relevant product tags based on the image, title, and description.
-
-Product Title: "${productTitle}"
+  const userMessage = `Product Title: "${productTitle}"
 Product Description: "${productDescription || "No description available"}"
 
-Requirements:
-- Generate 5-10 relevant tags
-- Include product type, style, color, material, occasion
-- ${localeInstruction}
-- Tags should be lowercase, hyphenated phrases
-- Focus on discoverability and SEO value
-
-Respond in this exact JSON format:
-{
-  "tags": ["tag1", "tag2", "tag3"]
-}`;
-
-  const imagePart = {
-    inlineData: {
-      data: imageBase64,
-      mimeType,
-    },
-  };
-
-  const result = await model.generateContent([prompt, imagePart]);
-  const response = result.response;
-  const text = response.text();
+${localeInstruction}`;
 
   try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: TAGS_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: userMessage },
+            { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+          ],
+        },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 500,
+    });
+
+    const text = response.choices[0]?.message?.content || "{}";
     const cleanedText = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleanedText);
+
     return { tags: parsed.tags || [] };
-  } catch {
+  } catch (error) {
+    console.error("[OpenAI] generateTags error:", error);
     return { tags: [] };
   }
 }

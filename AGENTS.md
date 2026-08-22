@@ -1,13 +1,13 @@
 # AGENTS.md - AltOptimizer
 
 ## Project Overview
-AltOptimizer is a Shopify embedded app that uses AI (Google Gemini) to optimize product images with SEO-friendly alt text, tags, and JSON-LD structured data.
+AltOptimizer is a Shopify embedded app that uses AI (OpenAI GPT-4o) to optimize product images with SEO-friendly alt text, tags, and JSON-LD structured data.
 
 ## Tech Stack
 - **Framework**: Remix (Shopify App Remix)
 - **UI**: Shopify Polaris v12
 - **Database**: SQLite via Prisma ORM
-- **AI**: Google Gemini 2.0 Flash
+- **AI**: OpenAI GPT-4o
 - **Language**: TypeScript
 
 ## Key Commands
@@ -34,7 +34,7 @@ app/
 │   ├── webhooks.tsx      # Shopify webhook handlers
 │   └── auth.$.tsx        # Auth callback
 ├── services/         # Server-side services
-│   ├── gemini.server.ts    # AI generation
+│   ├── openai.server.ts    # AI generation (OpenAI GPT-4o)
 │   ├── shopify.server.ts   # Shopify Admin API
 │   ├── billing.server.ts   # Quota & usage tracking
 │   ├── backup.server.ts    # Backup & restore
@@ -63,12 +63,12 @@ prisma/
 ## Environment Variables
 - `SHOPIFY_API_KEY` - Shopify app API key
 - `SHOPIFY_API_SECRET` - Shopify app secret
-- `GEMINI_API_KEY` - Google Gemini API key
+- `OPENAI_API_KEY` - OpenAI API key (GPT-4o)
 - `DATABASE_URL` - SQLite database URL (default: file:./dev.db)
 
 ## Important Notes
 - Server-only code uses `.server.ts` suffix (not bundled for client)
 - Shared constants go in `constants.ts` (not `.server.ts`)
 - All Shopify API calls go through `shopify.server.ts`
-- AI generation uses Gemini 2.0 Flash model
+- AI generation uses OpenAI GPT-4o model
 - Quota tracking is per-shop, per-month

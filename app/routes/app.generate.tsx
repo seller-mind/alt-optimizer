@@ -21,7 +21,7 @@ import {
 import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
-import { analyzeImage, generateTags, generateJsonLd } from "~/services/gemini.server";
+import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
 import { fetchImageAsBase64, updateImageAltText, updateProductTags } from "~/services/shopify.server";
 import { checkQuota, incrementUsage } from "~/services/billing.server";
 
