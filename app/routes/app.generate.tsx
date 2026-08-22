@@ -1,32 +1,17 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, useLoaderData, useActionData, useSubmit, useNavigation } from "@remix-run/react";
 import {
-  Page,
-  Layout,
-  Card,
-  Text,
-  Button,
-  ButtonGroup,
-  BlockStack,
-  InlineStack,
-  Select,
-  Banner,
-  ProgressBar,
-  Badge,
-  Thumbnail,
-  IndexTable,
-  useIndexResourceState,
-  FormLayout,
-  ChoiceList,
-  Tooltip,
-  List,
+  Page, Layout, Card, Text, Button, BlockStack, InlineStack,
+  Select, Banner, ProgressBar, Badge, Thumbnail, IndexTable,
+  useIndexResourceState, FormLayout, ChoiceList, List, Modal,
 } from "@shopify/polaris";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
 import { fetchImageAsBase64, updateImageAltText, updateProductTags } from "~/services/shopify.server";
-import { checkQuota, incrementUsage } from "~/services/billing.server";
+import { checkQuota, enforceQuota, incrementUsage, QuotaExceededError } from "~/services/billing.server";
+import { PLANS } from "~/constants";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -80,6 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
     quota,
     shopLocale: shop.locale,
+    planType: shop.planType,
   };
 };
 
@@ -96,20 +82,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
 
+  // Enforce quota before any generation
+  try {
+    if (intent === "generate_alt") await enforceQuota(shop.id, "images");
+    else if (intent === "generate_tags") await enforceQuota(shop.id, "tags");
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      return json({
+        success: false,
+        quotaExceeded: true,
+        error: `Monthly quota exceeded. You've used ${err.usage} of ${err.quota} on the ${err.planName} plan.`,
+        planName: err.planName,
+        quota: err.quota,
+        usage: err.usage,
+      });
+    }
+    throw err;
+  }
+
   if (intent === "generate_alt") {
     const imageIds = formData.getAll("imageIds") as string[];
     const autoApply = formData.get("autoApply") === "true";
 
-    const quota = await checkQuota(shop.id);
-    if (!quota.canGenerate) {
-      return json({
-        success: false,
-        error: "Monthly quota exceeded. Please upgrade your plan.",
-      });
-    }
-
     const results: Array<{
       imageId: number;
+      imageSrc?: string;
+      productTitle?: string;
       altText: string;
       success: boolean;
       error?: string;
@@ -155,22 +153,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         results.push({
           imageId,
+          imageSrc: image.src,
+          productTitle: image.product.title,
           altText: analysis.altText,
           success: true,
         });
       } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        // Categorize errors for better user feedback
+        let friendlyError = message;
+        if (message.includes("429") || message.includes("rate limit")) {
+          friendlyError = "OpenAI rate limit hit. Please wait a moment and try again.";
+        } else if (message.includes("timeout") || message.includes("timed out")) {
+          friendlyError = "Request timed out. The image may be too large. Try again.";
+        } else if (message.includes("401") || message.includes("API key")) {
+          friendlyError = "OpenAI API key is invalid or missing. Check your settings.";
+        } else if (message.includes("invalid image") || message.includes("corrupt")) {
+          friendlyError = "Invalid image data. Skipping this image.";
+        }
+
         results.push({
           imageId,
           altText: "",
           success: false,
-          error: err instanceof Error ? err.message : "Unknown error",
+          error: friendlyError,
         });
       }
     }
 
-    await incrementUsage(shop.id, imageIds.length);
-
     const successCount = results.filter((r) => r.success).length;
+    if (successCount > 0) {
+      await incrementUsage(shop.id, "images", successCount);
+    }
+
     return json({
       success: true,
       generated: successCount,
@@ -184,8 +199,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const results: Array<{
       productId: number;
+      productTitle?: string;
       tags: string[];
       success: boolean;
+      error?: string;
     }> = [];
 
     for (const productIdStr of productIds) {
@@ -215,12 +232,25 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         results.push({
           productId,
+          productTitle: product.title,
           tags: tagResult.tags,
           success: true,
         });
-      } catch {
-        results.push({ productId, tags: [], success: false });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        results.push({
+          productId,
+          productTitle: product.title,
+          tags: [],
+          success: false,
+          error: message,
+        });
       }
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    if (successCount > 0) {
+      await incrementUsage(shop.id, "tags", successCount);
     }
 
     return json({
@@ -231,6 +261,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "generate_jsonld") {
     const productIds = formData.getAll("productIds") as string[];
+    let successCount = 0;
 
     for (const productIdStr of productIds) {
       const productId = parseInt(productIdStr, 10);
@@ -262,19 +293,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             hasJsonLd: true,
           },
         });
+        successCount++;
       } catch {
         // Continue with next product
       }
     }
 
-    return json({ success: true });
+    if (successCount > 0) {
+      await incrementUsage(shop.id, "jsonld", successCount);
+    }
+
+    return json({ success: true, generated: successCount });
   }
 
   return json({ success: false, error: "Unknown action" });
 };
 
 export default function GeneratePage() {
-  const { products, quota, shopLocale } = useLoaderData<typeof loader>();
+  const { products, quota, shopLocale, planType } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
@@ -282,10 +318,13 @@ export default function GeneratePage() {
 
   const [generationType, setGenerationType] = useState<string>("alt_text");
   const [autoApply, setAutoApply] = useState<string>("false");
-  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const allImageIds = products.flatMap((p) => p.images.map((img) => String(img.id)));
   const selectedResources = useIndexResourceState(products);
+
+  // Show upgrade modal when quota exceeded
+  const showQuotaModal = actionData && !actionData.success && (actionData as any).quotaExceeded;
 
   const handleGenerate = useCallback(() => {
     const formData = new FormData();
@@ -299,12 +338,14 @@ export default function GeneratePage() {
             .flatMap((p) => p.images.map((img) => String(img.id)))
         : allImageIds;
 
+      if (selectedImageIds.length === 0) return;
       selectedImageIds.forEach((id) => formData.append("imageIds", id));
     } else {
       const selectedProductIds = selectedResources.selectedResources.length > 0
         ? selectedResources.selectedResources
         : products.map((p) => String(p.id));
 
+      if (selectedProductIds.length === 0) return;
       selectedProductIds.forEach((id) => formData.append("productIds", id));
     }
 
@@ -313,21 +354,67 @@ export default function GeneratePage() {
 
   return (
     <Page title="AI Generation" subtitle="Generate alt text, tags, and structured data">
+      {/* Upgrade Modal for Quota Exceeded */}
+      <Modal
+        open={showQuotaModal || showUpgradeModal}
+        onClose={() => { setShowUpgradeModal(false); }}
+        title="Plan Upgrade Required"
+        primaryAction={{
+          content: "View Plans",
+          onAction: () => window.open("/app/settings", "_self"),
+        }}
+        secondaryActions={[{
+          content: "Dismiss",
+          onAction: () => setShowUpgradeModal(false),
+        }]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            <Banner tone="warning" title="Monthly quota exceeded">
+              <Text as="p">
+                {showQuotaModal && (actionData as any)?.error}
+              </Text>
+            </Banner>
+            <Text as="h3" variant="headingSm">Available Plans</Text>
+            {Object.entries(PLANS).filter(([key]) => key !== "free").map(([key, plan]) => (
+              <Card key={key} padding="400">
+                <BlockStack gap="200">
+                  <InlineStack align="space-between" wrap={false}>
+                    <Text as="h3" variant="headingMd">{plan.name}</Text>
+                    <Text as="p" variant="headingLg" fontWeight="bold">
+                      ${plan.price}<Text as="span" variant="bodySm" tone="subdued">/month</Text>
+                    </Text>
+                  </InlineStack>
+                  <Text as="p" variant="bodyMd">{plan.description}</Text>
+                  <Badge>{plan.monthlyQuota} generations/month</Badge>
+                </BlockStack>
+              </Card>
+            ))}
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
+
       <Layout>
+        {/* Quota Warning Banner */}
         {quota.warning && (
           <Layout.Section>
             <Banner
-              title="Quota warning"
-              tone={quota.percentage >= 95 ? "critical" : "warning"}
+              title={quota.warning95 ? "Quota nearly exhausted" : "Quota warning"}
+              tone={quota.warning95 ? "critical" : "warning"}
+              action={{
+                content: "Upgrade Plan",
+                onAction: () => setShowUpgradeModal(true),
+              }}
             >
               <Text as="p">
-                You have used {quota.percentage}% of your monthly quota.
-                {quota.remaining} generations remaining.
+                You have used {quota.percentage}% of your monthly quota ({quota.remaining} remaining).
+                {quota.warning95 && " Please upgrade to avoid interruptions."}
               </Text>
             </Banner>
           </Layout.Section>
         )}
 
+        {/* Success Banner */}
         {actionData && actionData.success && (
           <Layout.Section>
             <Banner title="Generation complete" tone="success" onDismiss={() => {}}>
@@ -351,7 +438,8 @@ export default function GeneratePage() {
           </Layout.Section>
         )}
 
-        {actionData && !actionData.success && (
+        {/* Error Banner */}
+        {actionData && !actionData.success && !(actionData as any).quotaExceeded && (
           <Layout.Section>
             <Banner title="Error" tone="critical">
               <Text as="p">{"error" in actionData ? actionData.error : "An error occurred."}</Text>
@@ -362,9 +450,12 @@ export default function GeneratePage() {
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Generation Settings
-              </Text>
+              <InlineStack align="space-between" wrap={false}>
+                <Text as="h2" variant="headingMd">Generation Settings</Text>
+                <Badge tone={quota.remaining > 0 ? "success" : "critical"}>
+                  {quota.remaining} quota remaining
+                </Badge>
+              </InlineStack>
 
               <FormLayout>
                 <Select
@@ -397,7 +488,7 @@ export default function GeneratePage() {
                   <Button
                     variant="primary"
                     onClick={handleGenerate}
-                    disabled={isGenerating || products.length === 0}
+                    disabled={isGenerating || products.length === 0 || quota.remaining <= 0}
                     loading={isGenerating}
                   >
                     {isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`}
@@ -411,9 +502,7 @@ export default function GeneratePage() {
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Eligible Products
-              </Text>
+              <Text as="h2" variant="headingMd">Eligible Products</Text>
               <Text as="p" variant="bodySm" tone="subdued">
                 Select specific products or leave all selected to generate for all eligible items.
               </Text>
@@ -451,9 +540,7 @@ export default function GeneratePage() {
                         </IndexTable.Cell>
                         <IndexTable.Cell>
                           <Text as="p" fontWeight="semibold">{product.title}</Text>
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            /{product.handle}
-                          </Text>
+                          <Text as="p" variant="bodySm" tone="subdued">/{product.handle}</Text>
                         </IndexTable.Cell>
                         <IndexTable.Cell>
                           <Badge>{product.images.length} images</Badge>
@@ -462,27 +549,33 @@ export default function GeneratePage() {
                     ))}
                   </IndexTable>
 
-                  {/* Failed Results with Retry */}
+                  {/* Generation Results with Retry */}
                   {actionData?.success && "results" in actionData && actionData.results && (
                     <Card>
                       <BlockStack gap="200">
-                        <Text as="h3" variant="headingSm">Generation Results</Text>
+                        <Text as="h3" variant="headingSm">
+                          Generation Results ({actionData.results.filter((r: any) => r.success).length} succeeded, {actionData.results.filter((r: any) => !r.success).length} failed)
+                        </Text>
+
                         {actionData.results.filter((r: any) => !r.success).length > 0 && (
                           <>
                             <Banner tone="critical" title="Some items failed">
-                              <Text as="p">
-                                The following items encountered errors. You can retry them individually.
-                              </Text>
+                              <Text as="p">Failed items can be retried individually.</Text>
                             </Banner>
                             <List type="bullet">
                               {actionData.results
                                 .filter((r: any) => !r.success)
                                 .map((r: any) => (
-                                  <List.Item key={r.imageId}>
+                                  <List.Item key={r.imageId || r.productId}>
                                     <InlineStack gap="200" wrap={false} align="space-between">
-                                      <Text as="p" variant="bodySm" tone="critical">
-                                        Image #{r.imageId}: {r.error || "Unknown error"}
-                                      </Text>
+                                      <BlockStack gap="100">
+                                        <Text as="p" variant="bodySm" fontWeight="semibold">
+                                          {r.productTitle || `Image #${r.imageId}`}
+                                        </Text>
+                                        <Text as="p" variant="bodySm" tone="critical">
+                                          {r.error || "Unknown error"}
+                                        </Text>
+                                      </BlockStack>
                                       <Button
                                         size="slim"
                                         variant="plain"
@@ -501,9 +594,6 @@ export default function GeneratePage() {
                                 ))}
                             </List>
                           </>
-                        )}
-                        {actionData.results.filter((r: any) => r.success).length > 0 && (
-                          <Banner tone="success" title={`${actionData.results.filter((r: any) => r.success).length} generated successfully`} />
                         )}
                       </BlockStack>
                     </Card>

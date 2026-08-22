@@ -19,7 +19,7 @@ import {
 import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
-import { getCurrentUsage, getUsageHistory } from "~/services/billing.server";
+import { getCurrentUsage, getUsageHistory, deleteShopData } from "~/services/billing.server";
 import { PLANS } from "~/constants";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -85,6 +85,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ success: true, message: "Language preference updated." });
   }
 
+  if (intent === "delete_my_data") {
+    await deleteShopData(shop.id);
+    return json({ success: true, message: "All your data has been permanently deleted." });
+  }
+
   return json({ success: false, error: "Unknown action" });
 };
 
@@ -97,6 +102,7 @@ export default function SettingsPage() {
 
   const [selectedPlan, setSelectedPlan] = useState(planType);
   const [selectedLocale, setSelectedLocale] = useState(locale);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleUpdatePlan = useCallback(() => {
     const formData = new FormData();
@@ -135,7 +141,10 @@ export default function SettingsPage() {
 
   const usageRows = history.slice(0, 14).map((h) => [
     h.date,
+    String(h.imagesGenerated + h.tagsGenerated + h.jsonLdGenerated),
     String(h.imagesGenerated),
+    String(h.tagsGenerated),
+    String(h.jsonLdGenerated),
     String(h.apiCalls),
   ]);
 
@@ -238,15 +247,27 @@ export default function SettingsPage() {
                   <Badge>{usage.planName}</Badge>
                 </InlineStack>
                 <InlineStack align="space-between">
-                  <Text as="p">Images Generated</Text>
+                  <Text as="p">Alt Text Generated</Text>
+                  <Text as="p" fontWeight="semibold">{usage.imagesGenerated}</Text>
+                </InlineStack>
+                <InlineStack align="space-between">
+                  <Text as="p">Tags Generated</Text>
+                  <Text as="p" fontWeight="semibold">{usage.tagsGenerated}</Text>
+                </InlineStack>
+                <InlineStack align="space-between">
+                  <Text as="p">JSON-LD Generated</Text>
+                  <Text as="p" fontWeight="semibold">{usage.jsonLdGenerated}</Text>
+                </InlineStack>
+                <InlineStack align="space-between">
+                  <Text as="p">Total Usage</Text>
                   <Text as="p" fontWeight="semibold">
-                    {usage.imagesGenerated} / {usage.quota}
+                    {usage.imagesGenerated + usage.tagsGenerated + usage.jsonLdGenerated} / {usage.quota}
                   </Text>
                 </InlineStack>
                 <ProgressBar progress={usage.percentage / 100} />
                 <InlineStack align="space-between">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    {usage.quota - usage.imagesGenerated} remaining
+                    {usage.remaining} remaining
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
                     {usage.percentage}% used
@@ -269,8 +290,8 @@ export default function SettingsPage() {
                 </Text>
               ) : (
                 <DataTable
-                  columnContentTypes={["text", "numeric", "numeric"]}
-                  headings={["Date", "Images Generated", "API Calls"]}
+                  columnContentTypes={["text", "numeric", "numeric", "numeric", "numeric", "numeric"]}
+                  headings={["Date", "Total", "Alt Text", "Tags", "JSON-LD", "API Calls"]}
                   rows={usageRows}
                 />
               )}
@@ -278,7 +299,7 @@ export default function SettingsPage() {
           </Card>
         </Layout.Section>
 
-        <Layout.Section>
+        <Layout.Section variant="oneHalf">
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">
@@ -289,9 +310,65 @@ export default function SettingsPage() {
                 <Text as="p">{shopDomain}</Text>
               </InlineStack>
               <InlineStack align="space-between">
+                <Text as="p" tone="subdued">AI Provider</Text>
+                <Badge tone="info">OpenAI GPT-4o</Badge>
+              </InlineStack>
+              <InlineStack align="space-between">
                 <Text as="p" tone="subdued">App Version</Text>
                 <Text as="p">1.0.0</Text>
               </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section variant="oneHalf">
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack align="space-between" wrap={false}>
+                <Text as="h2" variant="headingMd" tone="critical">
+                  GDPR & Data Deletion
+                </Text>
+                <Badge tone="critical">GDPR</Badge>
+              </InlineStack>
+              <Text as="p" variant="bodySm" tone="subdued">
+                AltOptimizer only stores product data, product images, and generated AI content.
+                We do not collect customer data, order information, or personal data.
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                If you delete your data, all your products, images, alt text history, backups, and usage metrics will be permanently removed. This action cannot be undone.
+              </Text>
+              {!showDeleteConfirm ? (
+                <Button
+                  tone="critical"
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  Delete My Data
+                </Button>
+              ) : (
+                <BlockStack gap="200">
+                  <Banner tone="critical" title="Are you sure?">
+                    <Text as="p">This will permanently delete all your store data from AltOptimizer. This cannot be undone.</Text>
+                  </Banner>
+                  <InlineStack gap="200">
+                    <Button
+                      tone="critical"
+                      variant="primary"
+                      onClick={() => {
+                        const fd = new FormData();
+                        fd.set("intent", "delete_my_data");
+                        submit(fd, { method: "post" });
+                      }}
+                    >
+                      Yes, Delete Everything
+                    </Button>
+                    <Button onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+                  </InlineStack>
+                </BlockStack>
+              )}
+              <Text as="p" variant="bodyXs" tone="subdued">
+                Data retention policy: After uninstalling, your data is kept for 30 days.
+                You can request immediate deletion at any time.
+              </Text>
             </BlockStack>
           </Card>
         </Layout.Section>

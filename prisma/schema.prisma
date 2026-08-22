@@ -29,6 +29,9 @@ model Shop {
   status      String   @default("active")
   locale      String   @default("en")
   chargeId    String?  @map("charge_id")
+  uninstallDate DateTime? @map("uninstall_date")
+  dataRetentionUntil DateTime? @map("data_retention_until")
+  lastQuotaResetAt DateTime @default(now()) @map("last_quota_reset_at")
 
   products        Product[]
   backupSnapshots BackupSnapshot[]
@@ -101,6 +104,8 @@ model UsageMetric {
   shopId           Int      @map("shop_id")
   date             String   // YYYY-MM-DD format
   imagesGenerated  Int      @default(0) @map("images_generated")
+  tagsGenerated    Int      @default(0) @map("tags_generated")
+  jsonLdGenerated  Int      @default(0) @map("json_ld_generated")
   apiCalls         Int      @default(0) @map("api_calls")
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)

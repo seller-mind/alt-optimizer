@@ -5,6 +5,7 @@ client_id = ""
 application_url = "https://localhost:5000"
 embedded = true
 name = "AltOptimizer"
+description = "AI-powered product image optimizer. Generate SEO-optimized alt text, product tags, and JSON-LD structured data for your Shopify store."
 
 [build]
 dev_store_url = ""
@@ -13,8 +14,14 @@ automatically_update_urls_on_dev = true
 [auth]
 redirect_urls = [
   "https://localhost:5000/auth/callback",
-  "https://localhost:5000/auth/shopify/callback"
+  "https://localhost:5000/auth/shopify/callback",
+  "https://localhost:5000/auth"
 ]
+
+[access_scopes]
+# Using legacy scopes for compatibility
+use_legacy_install_flow = true
+scopes = "read_products,write_products,read_themes,write_themes,read_content,write_content"
 
 [webhooks]
 api_version = "2024-10"
@@ -29,5 +36,23 @@ api_version = "2024-10"
   [webhooks.subscriptions.customers_data_request]
   uri = "/webhooks/customers/data_request"
 
+  [webhooks.subscriptions.app_subscriptions_update]
+  uri = "/webhooks/app/subscriptions/update"
+
+  [webhooks.subscriptions.app_subscriptions_decline]
+  uri = "/webhooks/app/subscriptions/decline"
+
 [pos]
 embedded = false
+
+[privacy]
+privacy_policy_url = "https://localhost:5000/privacy"
+terms_of_service_url = "https://localhost:5000/terms"
+
+[app_preferences]
+# App preferences
+gtm_container_id = ""
+
+[branding]
+# App branding
+# See https://shopify.dev/docs/apps/build/cli-for-shopify/app-configuration#branding

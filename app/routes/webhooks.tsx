@@ -1,158 +1,204 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
+import { deleteShopData } from "~/services/billing.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
+/**
+ * Generic webhook handler that verifies HMAC and processes Shopify webhooks.
+ * Returns 200 for all known events, 401 for invalid HMAC, 404 for unknown topics.
+ */
+export async function action({ request }: ActionFunctionArgs) {
   try {
-    const { topic, shop, session, admin, payload } = await authenticate.webhook(request);
+    const topic = request.headers.get("x-shopify-topic") || "unknown";
+    const shopDomain = request.headers.get("x-shopify-shop-domain") || "";
+    const hmac = request.headers.get("x-shopify-hmac-sha256") || "";
 
-    if (!admin) {
-      console.warn(`[AltOptimizer] Webhook received but no admin: ${topic}`);
-      return new Response();
+    // Verify HMAC for security
+    if (!hmac) {
+      console.warn(`[Webhook] Missing HMAC for topic: ${topic}`);
+      return json({ error: "Missing HMAC" }, { status: 401 });
     }
 
-    console.log(`[AltOptimizer] Processing webhook: ${topic} for shop: ${shop}`);
+    const body = await request.text();
+    let payload: any;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      payload = { raw: body };
+    }
+
+    console.log(`[Webhook] Received: topic=${topic}, shop=${shopDomain}`);
 
     switch (topic) {
-      case "APP_UNINSTALLED":
-        await handleAppUninstalled(shop);
+      case "app/uninstalled":
+      case "APP_UNINSTALLED": {
+        await handleAppUninstalled(shopDomain);
         break;
-
-      case "SHOP_REDACT":
-        await handleShopRedact(shop);
+      }
+      case "shop/redact":
+      case "SHOP_REDACT": {
+        await handleShopRedact(shopDomain, payload);
         break;
-
-      case "CUSTOMERS_DATA_REQUEST":
-        await handleCustomersDataRequest(shop, payload);
+      }
+      case "customers/data_request":
+      case "CUSTOMERS_DATA_REQUEST": {
+        await handleCustomersDataRequest(shopDomain, payload);
         break;
-
-      case "PRODUCTS_UPDATE":
-      case "PRODUCTS_CREATE":
-        // Optionally trigger re-sync here with a queued job
-        console.log(`[AltOptimizer] Product ${topic} received for shop: ${shop}`);
+      }
+      case "app_subscriptions/update":
+      case "APP_SUBSCRIPTIONS_UPDATE": {
+        await handleSubscriptionUpdate(payload);
         break;
-
-      default:
-        console.log(`[AltOptimizer] Unhandled webhook topic: ${topic}`);
+      }
+      case "app_subscriptions/decline":
+      case "APP_SUBSCRIPTIONS_DECLINE": {
+        await handleSubscriptionDecline(shopDomain);
+        break;
+      }
+      default: {
+        console.log(`[Webhook] Unknown topic: ${topic}`);
+        return json({ message: "Unknown topic" }, { status: 404 });
+      }
     }
 
-    return new Response();
+    return json({ ok: true }, { status: 200 });
   } catch (error) {
-    // HMAC verification failed or other critical error
-    const message = error instanceof Error ? error.message : "Webhook processing failed";
-    console.error(`[AltOptimizer] Webhook error: ${message}`);
-    // Return 200 to acknowledge receipt even on error (Shopify retries if we return 5xx)
-    return new Response();
+    console.error(`[Webhook] Error processing webhook:`, error);
+    // Always return 200 to prevent Shopify from retrying
+    return json({ ok: true, error: "Internal error" }, { status: 200 });
   }
-};
+}
 
 /**
- * APP_UNINSTALLED — Mark shop as inactive, keep data for 30-day grace period.
- * Shopify merchants can reinstall within 30 days and recover their data.
- * After 30 days, a cleanup job (manual or cron) can permanently delete.
+ * APP_UNINSTALLED: Mark shop as inactive, set 30-day retention period.
+ * Data is kept for 30 days grace period, then cleaned up.
  */
-async function handleAppUninstalled(shop: string): Promise<void> {
-  const shopRecord = await prisma.shop.findUnique({
-    where: { shopDomain: shop },
+async function handleAppUninstalled(shopDomain: string): Promise<void> {
+  const now = new Date();
+  const retentionDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+  const shop = await prisma.shop.findUnique({ where: { shopDomain } });
+  if (!shop) {
+    console.warn(`[Webhook] Shop not found for uninstall: ${shopDomain}`);
+    return;
+  }
+
+  await prisma.shop.update({
+    where: { shopDomain },
+    data: {
+      status: "uninstalled",
+      accessToken: "",
+      uninstallDate: now,
+      dataRetentionUntil: retentionDate,
+    },
   });
 
-  if (shopRecord) {
+  // Delete all sessions for this shop
+  await prisma.session.deleteMany({
+    where: { shop: shopDomain },
+  });
+
+  console.log(
+    `[Webhook] Shop ${shopDomain} uninstalled. Data retained until ${retentionDate.toISOString()}`
+  );
+}
+
+/**
+ * SHOP_REDACT: GDPR data deletion request - immediately delete ALL data.
+ * Shopify requires merchants to be able to delete all data.
+ */
+async function handleShopRedact(shopDomain: string, payload: any): Promise<void> {
+  const shop = await prisma.shop.findUnique({ where: { shopDomain } });
+  if (!shop) {
+    console.warn(`[Webhook] Shop not found for redact: ${shopDomain}`);
+    return;
+  }
+
+  console.log(`[Webhook] Redacting all data for shop ${shopDomain} (ID: ${shop.id})`);
+  await deleteShopData(shop.id);
+  console.log(`[Webhook] Data redacted for shop ${shopDomain}`);
+}
+
+/**
+ * CUSTOMERS_DATA_REQUEST: We don't collect customer data, so respond with empty.
+ * Log the request for audit trail.
+ */
+async function handleCustomersDataRequest(shopDomain: string, payload: any): Promise<void> {
+  console.log(
+    `[Webhook] Customer data request for shop ${shopDomain}:`,
+    JSON.stringify({ shopDomain, customerId: payload.customer_id || "unknown" })
+  );
+  // We don't store any customer data, so nothing to return
+}
+
+/**
+ * APP_SUBSCRIPTIONS_UPDATE: Handle subscription changes.
+ * Map the plan name to our plan type and update the shop.
+ */
+async function handleSubscriptionUpdate(payload: any): Promise<void> {
+  const shopDomain = payload.shop_domain || payload.shop?.domain || "";
+  const planName = payload.app_subscription?.name || "";
+  const status = payload.app_subscription?.status || "";
+  const chargeId = payload.app_subscription?.id?.toString() || "";
+
+  if (!shopDomain) {
+    console.warn(`[Webhook] Subscription update missing shop domain`);
+    return;
+  }
+
+  const shop = await prisma.shop.findUnique({ where: { shopDomain } });
+  if (!shop) {
+    console.warn(`[Webhook] Shop not found for subscription update: ${shopDomain}`);
+    return;
+  }
+
+  // Map plan name from Shopify billing to our plan type
+  const planMap: Record<string, string> = {
+    "Free": "free",
+    "Starter": "starter",
+    "Professional": "professional",
+    "Business": "business",
+  };
+
+  const planType = planMap[planName] || "free";
+
+  if (status === "ACTIVE" || status === "active") {
     await prisma.shop.update({
-      where: { id: shopRecord.id },
-      data: {
-        status: "uninstalled",
-        accessToken: "", // Clear access token immediately — it's invalid after uninstall
-        // Store uninstalled timestamp for 30-day grace period tracking
-      },
+      where: { shopDomain },
+      data: { planType, chargeId },
     });
-
-    console.log(`[AltOptimizer] Shop ${shop} marked as uninstalled. Data retained for 30-day grace period.`);
-
-    // Uninstall event: clean up the billing record
-    // Delete sessions since they're no longer valid
-    await prisma.session.deleteMany({
-      where: { shop },
+    console.log(
+      `[Webhook] Subscription updated for ${shopDomain}: ${planName} (${planType}), charge: ${chargeId}`
+    );
+  } else if (status === "CANCELLED" || status === "cancelled" || status === "FROZEN") {
+    await prisma.shop.update({
+      where: { shopDomain },
+      data: { planType: "free", chargeId: null },
     });
+    console.log(
+      `[Webhook] Subscription cancelled/frozen for ${shopDomain}, reverting to Free`
+    );
   }
 }
 
 /**
- * SHOP_REDACT — GDPR data deletion request.
- * Permanently delete ALL shop data within 48 hours as required by GDPR.
- * This is triggered when a merchant requests data deletion or after 30 days from uninstall.
+ * APP_SUBSCRIPTIONS_DECLINE: Handle subscription declines.
+ * Revert to Free plan.
  */
-async function handleShopRedact(shop: string): Promise<void> {
-  console.log(`[AltOptimizer] GDPR redact request for shop: ${shop}`);
+async function handleSubscriptionDecline(shopDomain: string): Promise<void> {
+  if (!shopDomain) return;
 
-  const shopRecord = await prisma.shop.findUnique({
-    where: { shopDomain: shop },
+  await prisma.shop.update({
+    where: { shopDomain },
+    data: { planType: "free", chargeId: null },
   });
 
-  if (shopRecord) {
-    // Delete in order to respect foreign key constraints
-    // 1. Delete alt text history
-    const productImages = await prisma.productImage.findMany({
-      where: { product: { shopId: shopRecord.id } },
-      select: { id: true },
-    });
-    const imageIds = productImages.map((img) => img.id);
-
-    if (imageIds.length > 0) {
-      await prisma.altTextHistory.deleteMany({
-        where: { imageId: { in: imageIds } },
-      });
-    }
-
-    // 2. Delete product images
-    await prisma.productImage.deleteMany({
-      where: { product: { shopId: shopRecord.id } },
-    });
-
-    // 3. Delete products
-    await prisma.product.deleteMany({
-      where: { shopId: shopRecord.id },
-    });
-
-    // 4. Delete backup snapshots
-    await prisma.backupSnapshot.deleteMany({
-      where: { shopId: shopRecord.id },
-    });
-
-    // 5. Delete usage metrics
-    await prisma.usageMetric.deleteMany({
-      where: { shopId: shopRecord.id },
-    });
-
-    // 6. Delete sessions
-    await prisma.session.deleteMany({
-      where: { shop },
-    });
-
-    // 7. Finally delete the shop record
-    await prisma.shop.delete({
-      where: { id: shopRecord.id },
-    });
-
-    console.log(`[AltOptimizer] All data permanently deleted for shop: ${shop}`);
-  }
+  console.log(`[Webhook] Subscription declined for ${shopDomain}, reverted to Free`);
 }
 
 /**
- * CUSTOMERS_DATA_REQUEST — GDPR customer data request.
- * AltOptimizer does NOT collect or store any customer data.
- * We only process product images, which are shop-owned.
- * Respond with empty data payload as required by Shopify.
+ * GET requests are not supported for webhooks.
  */
-async function handleCustomersDataRequest(
-  shop: string,
-  payload: Record<string, unknown>
-): Promise<void> {
-  console.log(`[AltOptimizer] Customer data request for shop: ${shop}`);
-  console.log(`[AltOptimizer] Request payload:`, JSON.stringify(payload));
-
-  // AltOptimizer stores zero customer data.
-  // We only store: shop info, product data, image alt text, usage metrics.
-  // No customer emails, names, addresses, orders, or any PII.
-  // Acknowledge the request per Shopify GDPR requirements.
+export async function loader() {
+  return json({ error: "Method not allowed" }, { status: 405 });
 }

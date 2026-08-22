@@ -1,11 +1,11 @@
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { PassThrough } from "stream";
-import { createReadableStreamFromReadable } from "@remix-run/node";
+import { createReadableStreamFromReadable, json as json$1 } from "@remix-run/node";
 import { RemixServer, Meta, Links, Outlet, ScrollRestoration, Scripts, useRouteError, isRouteErrorResponse, useLoaderData, useActionData, useSubmit, useNavigation, json, useNavigate, useLocation, Link } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
-import { Page, Card, EmptyState, Text, useIndexResourceState, Layout, Banner, BlockStack, FormLayout, Select, ChoiceList, InlineStack, Button, IndexTable, Thumbnail, Badge, List, DataTable, ProgressBar, Grid, Box, ButtonGroup, Tabs, Tooltip, TextField } from "@shopify/polaris";
+import { Page, Card, EmptyState, Text, useIndexResourceState, Modal, BlockStack, Banner, InlineStack, Badge, Layout, FormLayout, Select, ChoiceList, Button, IndexTable, Thumbnail, List, DataTable, ProgressBar, Grid, Box, ButtonGroup, Tabs, Tooltip, TextField } from "@shopify/polaris";
 import { useState, useCallback, useMemo } from "react";
 import "@shopify/shopify-app-remix/adapters/node";
 import { shopifyApp, AppDistribution, ApiVersion } from "@shopify/shopify-app-remix/server";
@@ -887,10 +887,23 @@ const PLANS = {
     description: "For high-volume stores"
   }
 };
+class QuotaExceededError extends Error {
+  constructor(planName, quota, usage, type) {
+    super(`Quota exceeded for ${type}: ${usage}/${quota} used on ${planName} plan`);
+    this.planName = planName;
+    this.quota = quota;
+    this.usage = usage;
+    this.type = type;
+    this.name = "QuotaExceededError";
+  }
+}
+function getPlanByType(planType) {
+  return PLANS[planType] || PLANS.free;
+}
 async function getCurrentUsage(shopId) {
   const shop = await prisma.shop.findUnique({ where: { id: shopId } });
   if (!shop) throw new Error("Shop not found");
-  const plan = PLANS[shop.planType] || PLANS.free;
+  const plan = getPlanByType(shop.planType);
   const now = /* @__PURE__ */ new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const dateStr = monthStart.toISOString().split("T")[0];
@@ -898,40 +911,68 @@ async function getCurrentUsage(shopId) {
     where: { shopId_date: { shopId, date: dateStr } }
   });
   const imagesGenerated = (metric == null ? void 0 : metric.imagesGenerated) || 0;
+  const tagsGenerated = (metric == null ? void 0 : metric.tagsGenerated) || 0;
+  const jsonLdGenerated = (metric == null ? void 0 : metric.jsonLdGenerated) || 0;
   const apiCalls = (metric == null ? void 0 : metric.apiCalls) || 0;
+  const totalUsage = imagesGenerated + tagsGenerated + jsonLdGenerated;
   return {
     imagesGenerated,
+    tagsGenerated,
+    jsonLdGenerated,
     apiCalls,
     quota: plan.monthlyQuota,
-    percentage: Math.round(imagesGenerated / plan.monthlyQuota * 100),
-    planName: plan.name
+    percentage: Math.min(100, Math.round(totalUsage / plan.monthlyQuota * 100)),
+    planName: plan.name,
+    planType: shop.planType,
+    remaining: Math.max(0, plan.monthlyQuota - totalUsage)
   };
 }
-async function incrementUsage(shopId, imagesCount = 1) {
+async function checkQuota(shopId, type = "images") {
+  const usage = await getCurrentUsage(shopId);
+  const plan = getPlanByType(usage.planType);
+  usage.imagesGenerated + usage.tagsGenerated + usage.jsonLdGenerated;
+  return {
+    canGenerate: usage.remaining > 0,
+    remaining: usage.remaining,
+    quota: plan.monthlyQuota,
+    planName: plan.name,
+    planType: usage.planType,
+    warning: usage.percentage >= 80,
+    warning95: usage.percentage >= 95
+  };
+}
+async function enforceQuota(shopId, type = "images") {
+  const usage = await getCurrentUsage(shopId);
+  const plan = getPlanByType(usage.planType);
+  if (usage.remaining <= 0) {
+    throw new QuotaExceededError(
+      plan.name,
+      plan.monthlyQuota,
+      usage.imagesGenerated + usage.tagsGenerated + usage.jsonLdGenerated,
+      type
+    );
+  }
+}
+async function incrementUsage(shopId, type = "images", count = 1) {
   const now = /* @__PURE__ */ new Date();
-  const dateStr = now.toISOString().split("T")[0];
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const dateStr = monthStart.toISOString().split("T")[0];
+  const incrementField = type === "images" ? { imagesGenerated: { increment: count } } : type === "tags" ? { tagsGenerated: { increment: count } } : { jsonLdGenerated: { increment: count } };
   await prisma.usageMetric.upsert({
     where: { shopId_date: { shopId, date: dateStr } },
     update: {
-      imagesGenerated: { increment: imagesCount },
+      ...incrementField,
       apiCalls: { increment: 1 }
     },
     create: {
       shopId,
       date: dateStr,
-      imagesGenerated: imagesCount,
+      imagesGenerated: type === "images" ? count : 0,
+      tagsGenerated: type === "tags" ? count : 0,
+      jsonLdGenerated: type === "jsonld" ? count : 0,
       apiCalls: 1
     }
   });
-}
-async function checkQuota(shopId) {
-  const usage = await getCurrentUsage(shopId);
-  const remaining = usage.quota - usage.imagesGenerated;
-  return {
-    canGenerate: remaining > 0,
-    remaining,
-    warning: usage.percentage >= 80
-  };
 }
 async function getUsageHistory(shopId, days = 30) {
   const metrics = await prisma.usageMetric.findMany({
@@ -942,10 +983,26 @@ async function getUsageHistory(shopId, days = 30) {
   return metrics.map((m) => ({
     date: m.date,
     imagesGenerated: m.imagesGenerated,
+    tagsGenerated: m.tagsGenerated,
+    jsonLdGenerated: m.jsonLdGenerated,
     apiCalls: m.apiCalls
   }));
 }
-const loader$7 = async ({ request }) => {
+async function deleteShopData(shopId) {
+  await prisma.$transaction([
+    prisma.altTextHistory.deleteMany({
+      where: { image: { product: { shopId } } }
+    }),
+    prisma.productImage.deleteMany({
+      where: { product: { shopId } }
+    }),
+    prisma.product.deleteMany({ where: { shopId } }),
+    prisma.backupSnapshot.deleteMany({ where: { shopId } }),
+    prisma.usageMetric.deleteMany({ where: { shopId } }),
+    prisma.shop.delete({ where: { id: shopId } })
+  ]);
+}
+const loader$a = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -992,7 +1049,8 @@ const loader$7 = async ({ request }) => {
       }))
     })),
     quota,
-    shopLocale: shop.locale
+    shopLocale: shop.locale,
+    planType: shop.planType
   };
 };
 const action$5 = async ({ request }) => {
@@ -1005,16 +1063,25 @@ const action$5 = async ({ request }) => {
   }
   const formData = await request.formData();
   const intent = formData.get("intent");
+  try {
+    if (intent === "generate_alt") await enforceQuota(shop.id, "images");
+    else if (intent === "generate_tags") await enforceQuota(shop.id, "tags");
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      return json({
+        success: false,
+        quotaExceeded: true,
+        error: `Monthly quota exceeded. You've used ${err.usage} of ${err.quota} on the ${err.planName} plan.`,
+        planName: err.planName,
+        quota: err.quota,
+        usage: err.usage
+      });
+    }
+    throw err;
+  }
   if (intent === "generate_alt") {
     const imageIds = formData.getAll("imageIds");
     const autoApply = formData.get("autoApply") === "true";
-    const quota = await checkQuota(shop.id);
-    if (!quota.canGenerate) {
-      return json({
-        success: false,
-        error: "Monthly quota exceeded. Please upgrade your plan."
-      });
-    }
     const results = [];
     for (const imageIdStr of imageIds) {
       const imageId = parseInt(imageIdStr, 10);
@@ -1050,20 +1117,35 @@ const action$5 = async ({ request }) => {
         });
         results.push({
           imageId,
+          imageSrc: image.src,
+          productTitle: image.product.title,
           altText: analysis.altText,
           success: true
         });
       } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        let friendlyError = message;
+        if (message.includes("429") || message.includes("rate limit")) {
+          friendlyError = "OpenAI rate limit hit. Please wait a moment and try again.";
+        } else if (message.includes("timeout") || message.includes("timed out")) {
+          friendlyError = "Request timed out. The image may be too large. Try again.";
+        } else if (message.includes("401") || message.includes("API key")) {
+          friendlyError = "OpenAI API key is invalid or missing. Check your settings.";
+        } else if (message.includes("invalid image") || message.includes("corrupt")) {
+          friendlyError = "Invalid image data. Skipping this image.";
+        }
         results.push({
           imageId,
           altText: "",
           success: false,
-          error: err instanceof Error ? err.message : "Unknown error"
+          error: friendlyError
         });
       }
     }
-    await incrementUsage(shop.id, imageIds.length);
     const successCount = results.filter((r) => r.success).length;
+    if (successCount > 0) {
+      await incrementUsage(shop.id, "images", successCount);
+    }
     return json({
       success: true,
       generated: successCount,
@@ -1097,12 +1179,24 @@ const action$5 = async ({ request }) => {
         });
         results.push({
           productId,
+          productTitle: product.title,
           tags: tagResult.tags,
           success: true
         });
-      } catch {
-        results.push({ productId, tags: [], success: false });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        results.push({
+          productId,
+          productTitle: product.title,
+          tags: [],
+          success: false,
+          error: message
+        });
       }
+    }
+    const successCount = results.filter((r) => r.success).length;
+    if (successCount > 0) {
+      await incrementUsage(shop.id, "tags", successCount);
     }
     return json({
       success: true,
@@ -1111,6 +1205,7 @@ const action$5 = async ({ request }) => {
   }
   if (intent === "generate_jsonld") {
     const productIds = formData.getAll("productIds");
+    let successCount = 0;
     for (const productIdStr of productIds) {
       const productId = parseInt(productIdStr, 10);
       const product = await prisma.product.findUnique({
@@ -1138,197 +1233,257 @@ const action$5 = async ({ request }) => {
             hasJsonLd: true
           }
         });
+        successCount++;
       } catch {
       }
     }
-    return json({ success: true });
+    if (successCount > 0) {
+      await incrementUsage(shop.id, "jsonld", successCount);
+    }
+    return json({ success: true, generated: successCount });
   }
   return json({ success: false, error: "Unknown action" });
 };
 function GeneratePage() {
-  const { products, quota, shopLocale } = useLoaderData();
+  const { products, quota, shopLocale, planType } = useLoaderData();
   const actionData = useActionData();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isGenerating = navigation.state !== "idle";
   const [generationType, setGenerationType] = useState("alt_text");
   const [autoApply, setAutoApply] = useState("false");
-  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const allImageIds = products.flatMap((p) => p.images.map((img) => String(img.id)));
   const selectedResources = useIndexResourceState(products);
+  const showQuotaModal = actionData && !actionData.success && actionData.quotaExceeded;
   const handleGenerate = useCallback(() => {
     const formData = new FormData();
     formData.set("intent", generationType === "alt_text" ? "generate_alt" : generationType === "tags" ? "generate_tags" : "generate_jsonld");
     formData.set("autoApply", autoApply);
     if (generationType === "alt_text") {
       const selectedImageIds = selectedResources.selectedResources.length > 0 ? products.filter((p) => selectedResources.selectedResources.includes(String(p.id))).flatMap((p) => p.images.map((img) => String(img.id))) : allImageIds;
+      if (selectedImageIds.length === 0) return;
       selectedImageIds.forEach((id) => formData.append("imageIds", id));
     } else {
       const selectedProductIds = selectedResources.selectedResources.length > 0 ? selectedResources.selectedResources : products.map((p) => String(p.id));
+      if (selectedProductIds.length === 0) return;
       selectedProductIds.forEach((id) => formData.append("productIds", id));
     }
     submit(formData, { method: "post" });
   }, [generationType, autoApply, selectedResources.selectedResources, products, allImageIds, submit]);
-  return /* @__PURE__ */ jsx(Page, { title: "AI Generation", subtitle: "Generate alt text, tags, and structured data", children: /* @__PURE__ */ jsxs(Layout, { children: [
-    quota.warning && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
-      Banner,
+  return /* @__PURE__ */ jsxs(Page, { title: "AI Generation", subtitle: "Generate alt text, tags, and structured data", children: [
+    /* @__PURE__ */ jsx(
+      Modal,
       {
-        title: "Quota warning",
-        tone: quota.percentage >= 95 ? "critical" : "warning",
-        children: /* @__PURE__ */ jsxs(Text, { as: "p", children: [
-          "You have used ",
-          quota.percentage,
-          "% of your monthly quota.",
-          quota.remaining,
-          " generations remaining."
-        ] })
-      }
-    ) }),
-    actionData && actionData.success && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Generation complete", tone: "success", onDismiss: () => {
-    }, children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-      /* @__PURE__ */ jsx(Text, { as: "p", children: "generated" in actionData ? `Successfully generated ${actionData.generated} of ${actionData.total} alt texts.` : "Operation completed successfully." }),
-      "results" in actionData && actionData.results && /* @__PURE__ */ jsx(Fragment, { children: actionData.results.filter((r) => !r.success).length > 0 && /* @__PURE__ */ jsxs(Text, { as: "p", tone: "critical", children: [
-        actionData.results.filter((r) => !r.success).length,
-        " failed. See details below."
-      ] }) })
-    ] }) }) }),
-    actionData && !actionData.success && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Error", tone: "critical", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "error" in actionData ? actionData.error : "An error occurred." }) }) }),
-    /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
-      /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Generation Settings" }),
-      /* @__PURE__ */ jsxs(FormLayout, { children: [
-        /* @__PURE__ */ jsx(
-          Select,
-          {
-            label: "Generation Type",
-            options: [
-              { label: "Alt Text (Image descriptions)", value: "alt_text" },
-              { label: "Product Tags", value: "tags" },
-              { label: "JSON-LD Structured Data", value: "jsonld" }
-            ],
-            value: generationType,
-            onChange: setGenerationType
-          }
-        ),
-        generationType === "alt_text" && /* @__PURE__ */ jsx(
-          ChoiceList,
-          {
-            title: "Auto-apply to Shopify",
-            choices: [
-              { label: "Yes, apply immediately to store", value: "true" },
-              { label: "No, save for review first", value: "false" }
-            ],
-            selected: [autoApply],
-            onChange: ([value]) => setAutoApply(value)
-          }
-        ),
-        /* @__PURE__ */ jsxs(InlineStack, { gap: "200", align: "space-between", children: [
-          /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-            products.length,
-            " products eligible for generation"
-          ] }),
-          /* @__PURE__ */ jsx(
-            Button,
-            {
-              variant: "primary",
-              onClick: handleGenerate,
-              disabled: isGenerating || products.length === 0,
-              loading: isGenerating,
-              children: isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`
-            }
-          )
-        ] })
-      ] })
-    ] }) }) }),
-    /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
-      /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Eligible Products" }),
-      /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Select specific products or leave all selected to generate for all eligible items." }),
-      products.length === 0 ? /* @__PURE__ */ jsx(Text, { as: "p", alignment: "center", children: "All products have alt text. No generation needed." }) : /* @__PURE__ */ jsxs(Fragment, { children: [
-        /* @__PURE__ */ jsx(
-          IndexTable,
-          {
-            resourceName: { singular: "product", plural: "products" },
-            itemCount: products.length,
-            selectedItemsCount: selectedResources.selectedItemsCount,
-            headings: [
-              { title: "Image" },
-              { title: "Product" },
-              { title: "Images Needing Alt" }
-            ],
-            ...selectedResources,
-            children: products.map((product, index) => {
-              var _a;
-              return /* @__PURE__ */ jsxs(
-                IndexTable.Row,
-                {
-                  id: String(product.id),
-                  selected: selectedResources.selectedResources.includes(String(product.id)),
-                  position: index,
-                  children: [
-                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
-                      Thumbnail,
-                      {
-                        source: ((_a = product.images[0]) == null ? void 0 : _a.src) || "",
-                        alt: product.title,
-                        size: "small"
-                      }
-                    ) }),
-                    /* @__PURE__ */ jsxs(IndexTable.Cell, { children: [
-                      /* @__PURE__ */ jsx(Text, { as: "p", fontWeight: "semibold", children: product.title }),
-                      /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-                        "/",
-                        product.handle
-                      ] })
-                    ] }),
-                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsxs(Badge, { children: [
-                      product.images.length,
-                      " images"
-                    ] }) })
-                  ]
-                },
-                product.id
-              );
-            })
-          }
-        ),
-        (actionData == null ? void 0 : actionData.success) && "results" in actionData && actionData.results && /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-          /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "Generation Results" }),
-          actionData.results.filter((r) => !r.success).length > 0 && /* @__PURE__ */ jsxs(Fragment, { children: [
-            /* @__PURE__ */ jsx(Banner, { tone: "critical", title: "Some items failed", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "The following items encountered errors. You can retry them individually." }) }),
-            /* @__PURE__ */ jsx(List, { type: "bullet", children: actionData.results.filter((r) => !r.success).map((r) => /* @__PURE__ */ jsx(List.Item, { children: /* @__PURE__ */ jsxs(InlineStack, { gap: "200", wrap: false, align: "space-between", children: [
-              /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "critical", children: [
-                "Image #",
-                r.imageId,
-                ": ",
-                r.error || "Unknown error"
-              ] }),
-              /* @__PURE__ */ jsx(
-                Button,
-                {
-                  size: "slim",
-                  variant: "plain",
-                  onClick: () => {
-                    const fd = new FormData();
-                    fd.set("intent", "generate_alt");
-                    fd.set("autoApply", autoApply);
-                    fd.append("imageIds", String(r.imageId));
-                    submit(fd, { method: "post" });
-                  },
-                  children: "Retry"
-                }
-              )
-            ] }) }, r.imageId)) })
-          ] }),
-          actionData.results.filter((r) => r.success).length > 0 && /* @__PURE__ */ jsx(Banner, { tone: "success", title: `${actionData.results.filter((r) => r.success).length} generated successfully` })
+        open: showQuotaModal || showUpgradeModal,
+        onClose: () => {
+          setShowUpgradeModal(false);
+        },
+        title: "Plan Upgrade Required",
+        primaryAction: {
+          content: "View Plans",
+          onAction: () => window.open("/app/settings", "_self")
+        },
+        secondaryActions: [{
+          content: "Dismiss",
+          onAction: () => setShowUpgradeModal(false)
+        }],
+        children: /* @__PURE__ */ jsx(Modal.Section, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+          /* @__PURE__ */ jsx(Banner, { tone: "warning", title: "Monthly quota exceeded", children: /* @__PURE__ */ jsx(Text, { as: "p", children: showQuotaModal && (actionData == null ? void 0 : actionData.error) }) }),
+          /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "Available Plans" }),
+          Object.entries(PLANS).filter(([key]) => key !== "free").map(([key, plan]) => /* @__PURE__ */ jsx(Card, { padding: "400", children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+            /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", wrap: false, children: [
+              /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingMd", children: plan.name }),
+              /* @__PURE__ */ jsxs(Text, { as: "p", variant: "headingLg", fontWeight: "bold", children: [
+                "$",
+                plan.price,
+                /* @__PURE__ */ jsx(Text, { as: "span", variant: "bodySm", tone: "subdued", children: "/month" })
+              ] })
+            ] }),
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: plan.description }),
+            /* @__PURE__ */ jsxs(Badge, { children: [
+              plan.monthlyQuota,
+              " generations/month"
+            ] })
+          ] }) }, key))
         ] }) })
-      ] })
-    ] }) }) })
-  ] }) });
+      }
+    ),
+    /* @__PURE__ */ jsxs(Layout, { children: [
+      quota.warning && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
+        Banner,
+        {
+          title: quota.warning95 ? "Quota nearly exhausted" : "Quota warning",
+          tone: quota.warning95 ? "critical" : "warning",
+          action: {
+            content: "Upgrade Plan",
+            onAction: () => setShowUpgradeModal(true)
+          },
+          children: /* @__PURE__ */ jsxs(Text, { as: "p", children: [
+            "You have used ",
+            quota.percentage,
+            "% of your monthly quota (",
+            quota.remaining,
+            " remaining).",
+            quota.warning95 && " Please upgrade to avoid interruptions."
+          ] })
+        }
+      ) }),
+      actionData && actionData.success && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Generation complete", tone: "success", onDismiss: () => {
+      }, children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+        /* @__PURE__ */ jsx(Text, { as: "p", children: "generated" in actionData ? `Successfully generated ${actionData.generated} of ${actionData.total} alt texts.` : "Operation completed successfully." }),
+        "results" in actionData && actionData.results && /* @__PURE__ */ jsx(Fragment, { children: actionData.results.filter((r) => !r.success).length > 0 && /* @__PURE__ */ jsxs(Text, { as: "p", tone: "critical", children: [
+          actionData.results.filter((r) => !r.success).length,
+          " failed. See details below."
+        ] }) })
+      ] }) }) }),
+      actionData && !actionData.success && !actionData.quotaExceeded && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Error", tone: "critical", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "error" in actionData ? actionData.error : "An error occurred." }) }) }),
+      /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", wrap: false, children: [
+          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Generation Settings" }),
+          /* @__PURE__ */ jsxs(Badge, { tone: quota.remaining > 0 ? "success" : "critical", children: [
+            quota.remaining,
+            " quota remaining"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxs(FormLayout, { children: [
+          /* @__PURE__ */ jsx(
+            Select,
+            {
+              label: "Generation Type",
+              options: [
+                { label: "Alt Text (Image descriptions)", value: "alt_text" },
+                { label: "Product Tags", value: "tags" },
+                { label: "JSON-LD Structured Data", value: "jsonld" }
+              ],
+              value: generationType,
+              onChange: setGenerationType
+            }
+          ),
+          generationType === "alt_text" && /* @__PURE__ */ jsx(
+            ChoiceList,
+            {
+              title: "Auto-apply to Shopify",
+              choices: [
+                { label: "Yes, apply immediately to store", value: "true" },
+                { label: "No, save for review first", value: "false" }
+              ],
+              selected: [autoApply],
+              onChange: ([value]) => setAutoApply(value)
+            }
+          ),
+          /* @__PURE__ */ jsxs(InlineStack, { gap: "200", align: "space-between", children: [
+            /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+              products.length,
+              " products eligible for generation"
+            ] }),
+            /* @__PURE__ */ jsx(
+              Button,
+              {
+                variant: "primary",
+                onClick: handleGenerate,
+                disabled: isGenerating || products.length === 0 || quota.remaining <= 0,
+                loading: isGenerating,
+                children: isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`
+              }
+            )
+          ] })
+        ] })
+      ] }) }) }),
+      /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+        /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Eligible Products" }),
+        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Select specific products or leave all selected to generate for all eligible items." }),
+        products.length === 0 ? /* @__PURE__ */ jsx(Text, { as: "p", alignment: "center", children: "All products have alt text. No generation needed." }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+          /* @__PURE__ */ jsx(
+            IndexTable,
+            {
+              resourceName: { singular: "product", plural: "products" },
+              itemCount: products.length,
+              selectedItemsCount: selectedResources.selectedItemsCount,
+              headings: [
+                { title: "Image" },
+                { title: "Product" },
+                { title: "Images Needing Alt" }
+              ],
+              ...selectedResources,
+              children: products.map((product, index) => {
+                var _a;
+                return /* @__PURE__ */ jsxs(
+                  IndexTable.Row,
+                  {
+                    id: String(product.id),
+                    selected: selectedResources.selectedResources.includes(String(product.id)),
+                    position: index,
+                    children: [
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
+                        Thumbnail,
+                        {
+                          source: ((_a = product.images[0]) == null ? void 0 : _a.src) || "",
+                          alt: product.title,
+                          size: "small"
+                        }
+                      ) }),
+                      /* @__PURE__ */ jsxs(IndexTable.Cell, { children: [
+                        /* @__PURE__ */ jsx(Text, { as: "p", fontWeight: "semibold", children: product.title }),
+                        /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+                          "/",
+                          product.handle
+                        ] })
+                      ] }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsxs(Badge, { children: [
+                        product.images.length,
+                        " images"
+                      ] }) })
+                    ]
+                  },
+                  product.id
+                );
+              })
+            }
+          ),
+          (actionData == null ? void 0 : actionData.success) && "results" in actionData && actionData.results && /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+            /* @__PURE__ */ jsxs(Text, { as: "h3", variant: "headingSm", children: [
+              "Generation Results (",
+              actionData.results.filter((r) => r.success).length,
+              " succeeded, ",
+              actionData.results.filter((r) => !r.success).length,
+              " failed)"
+            ] }),
+            actionData.results.filter((r) => !r.success).length > 0 && /* @__PURE__ */ jsxs(Fragment, { children: [
+              /* @__PURE__ */ jsx(Banner, { tone: "critical", title: "Some items failed", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "Failed items can be retried individually." }) }),
+              /* @__PURE__ */ jsx(List, { type: "bullet", children: actionData.results.filter((r) => !r.success).map((r) => /* @__PURE__ */ jsx(List.Item, { children: /* @__PURE__ */ jsxs(InlineStack, { gap: "200", wrap: false, align: "space-between", children: [
+                /* @__PURE__ */ jsxs(BlockStack, { gap: "100", children: [
+                  /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", fontWeight: "semibold", children: r.productTitle || `Image #${r.imageId}` }),
+                  /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "critical", children: r.error || "Unknown error" })
+                ] }),
+                /* @__PURE__ */ jsx(
+                  Button,
+                  {
+                    size: "slim",
+                    variant: "plain",
+                    onClick: () => {
+                      const fd = new FormData();
+                      fd.set("intent", "generate_alt");
+                      fd.set("autoApply", autoApply);
+                      fd.append("imageIds", String(r.imageId));
+                      submit(fd, { method: "post" });
+                    },
+                    children: "Retry"
+                  }
+                )
+              ] }) }, r.imageId || r.productId)) })
+            ] })
+          ] }) })
+        ] })
+      ] }) }) })
+    ] })
+  ] });
 }
 const route1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   action: action$5,
   default: GeneratePage,
-  loader: loader$7
+  loader: loader$a
 }, Symbol.toStringTag, { value: "Module" }));
 async function syncProductsFromShopify(shopId, admin) {
   let cursor = null;
@@ -1445,7 +1600,7 @@ async function getDashboardStats(shopId) {
     totalApiCalls: usageMetrics._sum.apiCalls || 0
   };
 }
-const loader$6 = async ({ request }) => {
+const loader$9 = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -1649,9 +1804,9 @@ const route2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   action: action$4,
   default: ProductsPage,
-  loader: loader$6
+  loader: loader$9
 }, Symbol.toStringTag, { value: "Module" }));
-const loader$5 = async ({ request }) => {
+const loader$8 = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -1705,6 +1860,10 @@ const action$3 = async ({ request }) => {
     });
     return json({ success: true, message: "Language preference updated." });
   }
+  if (intent === "delete_my_data") {
+    await deleteShopData(shop.id);
+    return json({ success: true, message: "All your data has been permanently deleted." });
+  }
   return json({ success: false, error: "Unknown action" });
 };
 function SettingsPage() {
@@ -1716,6 +1875,7 @@ function SettingsPage() {
   const isProcessing = navigation.state !== "idle";
   const [selectedPlan, setSelectedPlan] = useState(planType);
   const [selectedLocale, setSelectedLocale] = useState(locale);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const handleUpdatePlan = useCallback(() => {
     const formData = new FormData();
     formData.set("intent", "update_plan");
@@ -1748,7 +1908,10 @@ function SettingsPage() {
   ]);
   const usageRows = history.slice(0, 14).map((h) => [
     h.date,
+    String(h.imagesGenerated + h.tagsGenerated + h.jsonLdGenerated),
     String(h.imagesGenerated),
+    String(h.tagsGenerated),
+    String(h.jsonLdGenerated),
     String(h.apiCalls)
   ]);
   return /* @__PURE__ */ jsx(Page, { title: "Settings", subtitle: "Manage your plan and preferences", children: /* @__PURE__ */ jsxs(Layout, { children: [
@@ -1818,9 +1981,21 @@ function SettingsPage() {
           /* @__PURE__ */ jsx(Badge, { children: usage.planName })
         ] }),
         /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-          /* @__PURE__ */ jsx(Text, { as: "p", children: "Images Generated" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", children: "Alt Text Generated" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", fontWeight: "semibold", children: usage.imagesGenerated })
+        ] }),
+        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", children: "Tags Generated" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", fontWeight: "semibold", children: usage.tagsGenerated })
+        ] }),
+        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", children: "JSON-LD Generated" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", fontWeight: "semibold", children: usage.jsonLdGenerated })
+        ] }),
+        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", children: "Total Usage" }),
           /* @__PURE__ */ jsxs(Text, { as: "p", fontWeight: "semibold", children: [
-            usage.imagesGenerated,
+            usage.imagesGenerated + usage.tagsGenerated + usage.jsonLdGenerated,
             " / ",
             usage.quota
           ] })
@@ -1828,7 +2003,7 @@ function SettingsPage() {
         /* @__PURE__ */ jsx(ProgressBar, { progress: usage.percentage / 100 }),
         /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
           /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-            usage.quota - usage.imagesGenerated,
+            usage.remaining,
             " remaining"
           ] }),
           /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
@@ -1843,22 +2018,61 @@ function SettingsPage() {
       usageRows.length === 0 ? /* @__PURE__ */ jsx(Text, { as: "p", tone: "subdued", children: "No usage data yet. Start generating alt text to see your history." }) : /* @__PURE__ */ jsx(
         DataTable,
         {
-          columnContentTypes: ["text", "numeric", "numeric"],
-          headings: ["Date", "Images Generated", "API Calls"],
+          columnContentTypes: ["text", "numeric", "numeric", "numeric", "numeric", "numeric"],
+          headings: ["Date", "Total", "Alt Text", "Tags", "JSON-LD", "API Calls"],
           rows: usageRows
         }
       )
     ] }) }) }),
-    /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "300", children: [
+    /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "300", children: [
       /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Shop Information" }),
       /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
         /* @__PURE__ */ jsx(Text, { as: "p", tone: "subdued", children: "Shop Domain" }),
         /* @__PURE__ */ jsx(Text, { as: "p", children: shopDomain })
       ] }),
       /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+        /* @__PURE__ */ jsx(Text, { as: "p", tone: "subdued", children: "AI Provider" }),
+        /* @__PURE__ */ jsx(Badge, { tone: "info", children: "OpenAI GPT-4o" })
+      ] }),
+      /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
         /* @__PURE__ */ jsx(Text, { as: "p", tone: "subdued", children: "App Version" }),
         /* @__PURE__ */ jsx(Text, { as: "p", children: "1.0.0" })
       ] })
+    ] }) }) }),
+    /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+      /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", wrap: false, children: [
+        /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", tone: "critical", children: "GDPR & Data Deletion" }),
+        /* @__PURE__ */ jsx(Badge, { tone: "critical", children: "GDPR" })
+      ] }),
+      /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "AltOptimizer only stores product data, product images, and generated AI content. We do not collect customer data, order information, or personal data." }),
+      /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "If you delete your data, all your products, images, alt text history, backups, and usage metrics will be permanently removed. This action cannot be undone." }),
+      !showDeleteConfirm ? /* @__PURE__ */ jsx(
+        Button,
+        {
+          tone: "critical",
+          onClick: () => setShowDeleteConfirm(true),
+          children: "Delete My Data"
+        }
+      ) : /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+        /* @__PURE__ */ jsx(Banner, { tone: "critical", title: "Are you sure?", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "This will permanently delete all your store data from AltOptimizer. This cannot be undone." }) }),
+        /* @__PURE__ */ jsxs(InlineStack, { gap: "200", children: [
+          /* @__PURE__ */ jsx(
+            Button,
+            {
+              tone: "critical",
+              variant: "primary",
+              onClick: () => {
+                const fd = new FormData();
+                fd.set("intent", "delete_my_data");
+                submit(fd, { method: "post" });
+              },
+              children: "Yes, Delete Everything"
+            }
+          ),
+          /* @__PURE__ */ jsx(Button, { onClick: () => setShowDeleteConfirm(false), children: "Cancel" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyXs", tone: "subdued", children: "Data retention policy: After uninstalling, your data is kept for 30 days. You can request immediate deletion at any time." })
     ] }) }) })
   ] }) });
 }
@@ -1866,9 +2080,9 @@ const route3 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   action: action$3,
   default: SettingsPage,
-  loader: loader$5
+  loader: loader$8
 }, Symbol.toStringTag, { value: "Module" }));
-const loader$4 = async ({ request }) => {
+const loader$7 = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -2107,7 +2321,7 @@ function DashboardIndex() {
 const route4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: DashboardIndex,
-  loader: loader$4
+  loader: loader$7
 }, Symbol.toStringTag, { value: "Module" }));
 async function createBackup(shopId) {
   const products = await prisma.product.findMany({
@@ -2227,7 +2441,7 @@ async function exportToCsv(shopId) {
   }
   return rows.join("\n");
 }
-const loader$3 = async ({ request }) => {
+const loader$6 = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -2405,9 +2619,9 @@ const route5 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   action: action$2,
   default: BackupPage,
-  loader: loader$3
+  loader: loader$6
 }, Symbol.toStringTag, { value: "Module" }));
-const loader$2 = async ({ request }) => {
+const loader$5 = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -2931,106 +3145,199 @@ const route6 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   __proto__: null,
   action: action$1,
   default: ReviewPage,
-  loader: loader$2
+  loader: loader$5
 }, Symbol.toStringTag, { value: "Module" }));
-const action = async ({ request }) => {
+async function action({ request }) {
   try {
-    const { topic, shop, session, admin, payload } = await authenticate.webhook(request);
-    if (!admin) {
-      console.warn(`[AltOptimizer] Webhook received but no admin: ${topic}`);
-      return new Response();
+    const topic = request.headers.get("x-shopify-topic") || "unknown";
+    const shopDomain = request.headers.get("x-shopify-shop-domain") || "";
+    const hmac = request.headers.get("x-shopify-hmac-sha256") || "";
+    if (!hmac) {
+      console.warn(`[Webhook] Missing HMAC for topic: ${topic}`);
+      return json$1({ error: "Missing HMAC" }, { status: 401 });
     }
-    console.log(`[AltOptimizer] Processing webhook: ${topic} for shop: ${shop}`);
+    const body = await request.text();
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      payload = { raw: body };
+    }
+    console.log(`[Webhook] Received: topic=${topic}, shop=${shopDomain}`);
     switch (topic) {
-      case "APP_UNINSTALLED":
-        await handleAppUninstalled(shop);
+      case "app/uninstalled":
+      case "APP_UNINSTALLED": {
+        await handleAppUninstalled(shopDomain);
         break;
-      case "SHOP_REDACT":
-        await handleShopRedact(shop);
-        break;
-      case "CUSTOMERS_DATA_REQUEST":
-        await handleCustomersDataRequest(shop, payload);
-        break;
-      case "PRODUCTS_UPDATE":
-      case "PRODUCTS_CREATE":
-        console.log(`[AltOptimizer] Product ${topic} received for shop: ${shop}`);
-        break;
-      default:
-        console.log(`[AltOptimizer] Unhandled webhook topic: ${topic}`);
-    }
-    return new Response();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Webhook processing failed";
-    console.error(`[AltOptimizer] Webhook error: ${message}`);
-    return new Response();
-  }
-};
-async function handleAppUninstalled(shop) {
-  const shopRecord = await prisma.shop.findUnique({
-    where: { shopDomain: shop }
-  });
-  if (shopRecord) {
-    await prisma.shop.update({
-      where: { id: shopRecord.id },
-      data: {
-        status: "uninstalled",
-        accessToken: ""
-        // Clear access token immediately — it's invalid after uninstall
-        // Store uninstalled timestamp for 30-day grace period tracking
       }
-    });
-    console.log(`[AltOptimizer] Shop ${shop} marked as uninstalled. Data retained for 30-day grace period.`);
-    await prisma.session.deleteMany({
-      where: { shop }
-    });
-  }
-}
-async function handleShopRedact(shop) {
-  console.log(`[AltOptimizer] GDPR redact request for shop: ${shop}`);
-  const shopRecord = await prisma.shop.findUnique({
-    where: { shopDomain: shop }
-  });
-  if (shopRecord) {
-    const productImages = await prisma.productImage.findMany({
-      where: { product: { shopId: shopRecord.id } },
-      select: { id: true }
-    });
-    const imageIds = productImages.map((img) => img.id);
-    if (imageIds.length > 0) {
-      await prisma.altTextHistory.deleteMany({
-        where: { imageId: { in: imageIds } }
-      });
+      case "shop/redact":
+      case "SHOP_REDACT": {
+        await handleShopRedact(shopDomain, payload);
+        break;
+      }
+      case "customers/data_request":
+      case "CUSTOMERS_DATA_REQUEST": {
+        await handleCustomersDataRequest(shopDomain, payload);
+        break;
+      }
+      case "app_subscriptions/update":
+      case "APP_SUBSCRIPTIONS_UPDATE": {
+        await handleSubscriptionUpdate(payload);
+        break;
+      }
+      case "app_subscriptions/decline":
+      case "APP_SUBSCRIPTIONS_DECLINE": {
+        await handleSubscriptionDecline(shopDomain);
+        break;
+      }
+      default: {
+        console.log(`[Webhook] Unknown topic: ${topic}`);
+        return json$1({ message: "Unknown topic" }, { status: 404 });
+      }
     }
-    await prisma.productImage.deleteMany({
-      where: { product: { shopId: shopRecord.id } }
-    });
-    await prisma.product.deleteMany({
-      where: { shopId: shopRecord.id }
-    });
-    await prisma.backupSnapshot.deleteMany({
-      where: { shopId: shopRecord.id }
-    });
-    await prisma.usageMetric.deleteMany({
-      where: { shopId: shopRecord.id }
-    });
-    await prisma.session.deleteMany({
-      where: { shop }
-    });
-    await prisma.shop.delete({
-      where: { id: shopRecord.id }
-    });
-    console.log(`[AltOptimizer] All data permanently deleted for shop: ${shop}`);
+    return json$1({ ok: true }, { status: 200 });
+  } catch (error) {
+    console.error(`[Webhook] Error processing webhook:`, error);
+    return json$1({ ok: true, error: "Internal error" }, { status: 200 });
   }
 }
-async function handleCustomersDataRequest(shop, payload) {
-  console.log(`[AltOptimizer] Customer data request for shop: ${shop}`);
-  console.log(`[AltOptimizer] Request payload:`, JSON.stringify(payload));
+async function handleAppUninstalled(shopDomain) {
+  const now = /* @__PURE__ */ new Date();
+  const retentionDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1e3);
+  const shop = await prisma.shop.findUnique({ where: { shopDomain } });
+  if (!shop) {
+    console.warn(`[Webhook] Shop not found for uninstall: ${shopDomain}`);
+    return;
+  }
+  await prisma.shop.update({
+    where: { shopDomain },
+    data: {
+      status: "uninstalled",
+      accessToken: "",
+      uninstallDate: now,
+      dataRetentionUntil: retentionDate
+    }
+  });
+  await prisma.session.deleteMany({
+    where: { shop: shopDomain }
+  });
+  console.log(
+    `[Webhook] Shop ${shopDomain} uninstalled. Data retained until ${retentionDate.toISOString()}`
+  );
+}
+async function handleShopRedact(shopDomain, payload) {
+  const shop = await prisma.shop.findUnique({ where: { shopDomain } });
+  if (!shop) {
+    console.warn(`[Webhook] Shop not found for redact: ${shopDomain}`);
+    return;
+  }
+  console.log(`[Webhook] Redacting all data for shop ${shopDomain} (ID: ${shop.id})`);
+  await deleteShopData(shop.id);
+  console.log(`[Webhook] Data redacted for shop ${shopDomain}`);
+}
+async function handleCustomersDataRequest(shopDomain, payload) {
+  console.log(
+    `[Webhook] Customer data request for shop ${shopDomain}:`,
+    JSON.stringify({ shopDomain, customerId: payload.customer_id || "unknown" })
+  );
+}
+async function handleSubscriptionUpdate(payload) {
+  var _a, _b, _c, _d, _e;
+  const shopDomain = payload.shop_domain || ((_a = payload.shop) == null ? void 0 : _a.domain) || "";
+  const planName = ((_b = payload.app_subscription) == null ? void 0 : _b.name) || "";
+  const status = ((_c = payload.app_subscription) == null ? void 0 : _c.status) || "";
+  const chargeId = ((_e = (_d = payload.app_subscription) == null ? void 0 : _d.id) == null ? void 0 : _e.toString()) || "";
+  if (!shopDomain) {
+    console.warn(`[Webhook] Subscription update missing shop domain`);
+    return;
+  }
+  const shop = await prisma.shop.findUnique({ where: { shopDomain } });
+  if (!shop) {
+    console.warn(`[Webhook] Shop not found for subscription update: ${shopDomain}`);
+    return;
+  }
+  const planMap = {
+    "Free": "free",
+    "Starter": "starter",
+    "Professional": "professional",
+    "Business": "business"
+  };
+  const planType = planMap[planName] || "free";
+  if (status === "ACTIVE" || status === "active") {
+    await prisma.shop.update({
+      where: { shopDomain },
+      data: { planType, chargeId }
+    });
+    console.log(
+      `[Webhook] Subscription updated for ${shopDomain}: ${planName} (${planType}), charge: ${chargeId}`
+    );
+  } else if (status === "CANCELLED" || status === "cancelled" || status === "FROZEN") {
+    await prisma.shop.update({
+      where: { shopDomain },
+      data: { planType: "free", chargeId: null }
+    });
+    console.log(
+      `[Webhook] Subscription cancelled/frozen for ${shopDomain}, reverting to Free`
+    );
+  }
+}
+async function handleSubscriptionDecline(shopDomain) {
+  if (!shopDomain) return;
+  await prisma.shop.update({
+    where: { shopDomain },
+    data: { planType: "free", chargeId: null }
+  });
+  console.log(`[Webhook] Subscription declined for ${shopDomain}, reverted to Free`);
+}
+async function loader$4() {
+  return json$1({ error: "Method not allowed" }, { status: 405 });
 }
 const route7 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  action
+  action,
+  loader: loader$4
 }, Symbol.toStringTag, { value: "Module" }));
-const loader$1 = async ({ request }) => {
+const loader$3 = async () => {
+  return json$1({ lastUpdated: "2024-01-01" });
+};
+function PrivacyPage() {
+  const { lastUpdated } = useLoaderData();
+  return /* @__PURE__ */ jsx(Page, { title: "Privacy Policy", subtitle: `Last updated: ${lastUpdated}`, children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+    /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Privacy Policy for AltOptimizer" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "1. What Data We Collect" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "AltOptimizer collects and processes the following data from your Shopify store:" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Product data: titles, descriptions, handles, SKUs, and prices" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Product images: for AI analysis and alt text generation" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Generated content: AI-generated alt text, product tags, and JSON-LD structured data" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Usage metrics: number of images processed per month for quota tracking" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "2. What We Do NOT Collect" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "AltOptimizer does NOT collect:" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Customer data (names, emails, addresses, payment information)" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Order information or transaction data" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Personal identifiable information of store visitors" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Analytics or browsing behavior of store visitors" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "3. How We Use Your Data" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Product images are sent to OpenAI's GPT-4o API for AI analysis to generate descriptive alt text" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Product titles and descriptions are used to generate relevant tags and structured data" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Usage data is tracked for billing and quota management" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "4. Data Storage and Retention" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Your data is stored securely in our database during your active subscription" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• After uninstalling the app, your data is retained for 30 days (grace period)" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• After 30 days, all data is permanently deleted" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• You can request immediate data deletion at any time from the Settings page" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "5. Data Sharing" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Product images are sent to OpenAI's API for AI analysis. OpenAI does not use your data for training." }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• We do not sell, trade, or share your data with any third parties" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "6. Contact" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "For privacy-related inquiries, please contact the app developer through the Shopify App Store." })
+  ] }) }) });
+}
+const route8 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: PrivacyPage,
+  loader: loader$3
+}, Symbol.toStringTag, { value: "Module" }));
+const loader$2 = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   let shop = await prisma.shop.findUnique({
     where: { shopDomain: session.shop }
@@ -3047,8 +3354,54 @@ const loader$1 = async ({ request }) => {
   }
   return null;
 };
-const route8 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route9 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
+  loader: loader$2
+}, Symbol.toStringTag, { value: "Module" }));
+const loader$1 = async () => {
+  return json$1({ lastUpdated: "2024-01-01" });
+};
+function TermsPage() {
+  const { lastUpdated } = useLoaderData();
+  return /* @__PURE__ */ jsx(Page, { title: "Terms of Service", subtitle: `Last updated: ${lastUpdated}`, children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+    /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Terms of Service for AltOptimizer" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "1. Acceptance of Terms" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: 'By installing and using AltOptimizer (the "App"), you agree to these Terms of Service. If you do not agree, do not install or use the App.' }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "2. Description of Service" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "AltOptimizer is an AI-powered tool that generates SEO-optimized alt text, product tags, and JSON-LD structured data for Shopify product images. The App uses OpenAI's GPT-4o API to analyze product images and generate descriptive content." }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "3. Subscription and Billing" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• The App offers multiple subscription plans as described on the pricing page" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• All plans are billed through Shopify's billing system on a recurring 30-day basis" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• You can upgrade, downgrade, or cancel your subscription at any time" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Downgrading takes effect at the next billing cycle" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• No refunds are provided for partial billing periods" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "4. Usage Limits" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Each plan has a monthly quota of image generations as specified on the pricing page" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Usage resets at the start of each billing cycle" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Exceeding your quota will prevent further generations until the next cycle or plan upgrade" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "5. Acceptable Use" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "You agree to use the App only for lawful purposes and in accordance with Shopify's Terms of Service. You may not:" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Use the App to generate content that violates any applicable laws" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Attempt to circumvent quota limits or billing systems" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Reverse engineer or modify the App's code" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "6. Limitation of Liability" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: 'The App is provided "as is" without warranty of any kind. The developer shall not be liable for any damages arising from the use or inability to use the App, including but not limited to:' }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Loss of data (backup your data regularly using the backup feature)" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• AI-generated content accuracy (always review before applying)" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Service interruptions or downtime" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "7. Data Handling" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• Product images are sent to OpenAI for AI analysis. See our Privacy Policy for details." }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• We implement reasonable security measures to protect your data" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "• You can delete your data at any time from the Settings page" }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "8. Changes to Terms" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "We reserve the right to modify these terms at any time. You will be notified of material changes via the App or email." }),
+    /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "9. Contact" }),
+    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "For questions about these terms, please contact the app developer through the Shopify App Store." })
+  ] }) }) });
+}
+const route10 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: TermsPage,
   loader: loader$1
 }, Symbol.toStringTag, { value: "Module" }));
 function Boundary({ error: errorProp }) {
@@ -3183,14 +3536,14 @@ function ErrorBoundary() {
 const headers = (headersParams) => {
   return shopify.addDocumentResponseHeaders(headersParams);
 };
-const route9 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const route11 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   ErrorBoundary,
   default: AppLayout,
   headers,
   loader
 }, Symbol.toStringTag, { value: "Module" }));
-const serverManifest = { "entry": { "module": "/assets/entry.client-B51Dai5R.js", "imports": ["/assets/components-rJeHIEYM.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/root-BxhnVsOt.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/context-D-fBfBGM.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Image-Co8BjUBj.js"], "css": [] }, "routes/app.generate": { "id": "routes/app.generate", "parentId": "routes/app", "path": "generate", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.generate-ZlnxjRWb.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/FormLayout-CoiT_uXa.js", "/assets/Select-74J1FeeL.js", "/assets/Thumbnail-CPqV4kh1.js", "/assets/List-BnN9C8dJ.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.products": { "id": "routes/app.products", "parentId": "routes/app", "path": "products", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.products-Bv52mZk-.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DFtH3I5U.js", "/assets/Thumbnail-CPqV4kh1.js", "/assets/Layout-BsDb6giG.js", "/assets/Select-74J1FeeL.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.settings": { "id": "routes/app.settings", "parentId": "routes/app", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.settings-XQi46IuU.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/DataTable-BPHGHbA1.js", "/assets/FormLayout-CoiT_uXa.js", "/assets/Select-74J1FeeL.js", "/assets/ProgressBar-I8hKvVMl.js", "/assets/Sticky-8Z49oOeg.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app._index-BOPIa6lQ.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/List-BnN9C8dJ.js", "/assets/ProgressBar-I8hKvVMl.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.backup": { "id": "routes/app.backup", "parentId": "routes/app", "path": "backup", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.backup-CkjTN5N3.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/EmptyState-CqyJuFci.js", "/assets/DataTable-BPHGHbA1.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js"], "css": [] }, "routes/app.review": { "id": "routes/app.review", "parentId": "routes/app", "path": "review", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.review-B-RISgd3.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/ProgressBar-I8hKvVMl.js", "/assets/context-D-fBfBGM.js", "/assets/CSSTransition-UjcMz1VZ.js", "/assets/FormLayout-CoiT_uXa.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Thumbnail-CPqV4kh1.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js"], "css": [] }, "routes/webhooks": { "id": "routes/webhooks", "parentId": "root", "path": "webhooks", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/webhooks-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/app-Yrs1ZpQp.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Image-Co8BjUBj.js"], "css": [] } }, "url": "/assets/manifest-e557db2e.js", "version": "e557db2e" };
+const serverManifest = { "entry": { "module": "/assets/entry.client-B51Dai5R.js", "imports": ["/assets/components-rJeHIEYM.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/root-DLr0lOEJ.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/context-D-fBfBGM.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Image-Co8BjUBj.js"], "css": [] }, "routes/app.generate": { "id": "routes/app.generate", "parentId": "routes/app", "path": "generate", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.generate-JLrLtO1p.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/constants-Bsaf0VJ5.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DeC7d8NS.js", "/assets/Modal-DY4Uwayc.js", "/assets/Banner-y7vQyT0k.js", "/assets/Layout-BL5dzI_I.js", "/assets/FormLayout-BIJvsp-0.js", "/assets/Select-DrokdBk4.js", "/assets/Thumbnail-BcvuYLa6.js", "/assets/List-C-BNCk4f.js", "/assets/context-D-fBfBGM.js", "/assets/CSSTransition-UjcMz1VZ.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js"], "css": [] }, "routes/app.products": { "id": "routes/app.products", "parentId": "routes/app", "path": "products", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.products-Bwa0EIDU.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DeC7d8NS.js", "/assets/Thumbnail-BcvuYLa6.js", "/assets/Layout-BL5dzI_I.js", "/assets/Select-DrokdBk4.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.settings": { "id": "routes/app.settings", "parentId": "routes/app", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.settings-CrdWpb0M.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/constants-Bsaf0VJ5.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/DataTable-Ce--qcN6.js", "/assets/FormLayout-BIJvsp-0.js", "/assets/Select-DrokdBk4.js", "/assets/ProgressBar-Ci4Kutd9.js", "/assets/Sticky-BN_WgG5a.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app._index-DDO2zAbR.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/List-C-BNCk4f.js", "/assets/ProgressBar-Ci4Kutd9.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.backup": { "id": "routes/app.backup", "parentId": "routes/app", "path": "backup", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.backup-CA-Us_Bh.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/EmptyState-DQeWehrP.js", "/assets/DataTable-Ce--qcN6.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js"], "css": [] }, "routes/app.review": { "id": "routes/app.review", "parentId": "routes/app", "path": "review", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.review-Dm7J4cmg.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/Layout-BL5dzI_I.js", "/assets/Banner-y7vQyT0k.js", "/assets/ProgressBar-Ci4Kutd9.js", "/assets/Modal-DY4Uwayc.js", "/assets/FormLayout-BIJvsp-0.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Thumbnail-BcvuYLa6.js", "/assets/CSSTransition-UjcMz1VZ.js", "/assets/context-D-fBfBGM.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-BN_WgG5a.js"], "css": [] }, "routes/webhooks": { "id": "routes/webhooks", "parentId": "root", "path": "webhooks", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/webhooks-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/privacy": { "id": "routes/privacy", "parentId": "root", "path": "privacy", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/privacy-D8M6O-c_.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js"], "css": [] }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/terms": { "id": "routes/terms", "parentId": "root", "path": "terms", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/terms-BucXud27.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js"], "css": [] }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/app-BEjHeXD5.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DeC7d8NS.js", "/assets/EmptyState-DQeWehrP.js", "/assets/Image-Co8BjUBj.js"], "css": [] } }, "url": "/assets/manifest-aec2d8ff.js", "version": "aec2d8ff" };
 const mode = "production";
 const assetsBuildDirectory = "build/client";
 const basename = "/";
@@ -3263,13 +3616,29 @@ const routes = {
     caseSensitive: void 0,
     module: route7
   },
+  "routes/privacy": {
+    id: "routes/privacy",
+    parentId: "root",
+    path: "privacy",
+    index: void 0,
+    caseSensitive: void 0,
+    module: route8
+  },
   "routes/auth.$": {
     id: "routes/auth.$",
     parentId: "root",
     path: "auth/*",
     index: void 0,
     caseSensitive: void 0,
-    module: route8
+    module: route9
+  },
+  "routes/terms": {
+    id: "routes/terms",
+    parentId: "root",
+    path: "terms",
+    index: void 0,
+    caseSensitive: void 0,
+    module: route10
   },
   "routes/app": {
     id: "routes/app",
@@ -3277,7 +3646,7 @@ const routes = {
     path: "app",
     index: void 0,
     caseSensitive: void 0,
-    module: route9
+    module: route11
   }
 };
 export {
