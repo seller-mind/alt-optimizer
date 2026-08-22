@@ -1,12 +1,12 @@
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { PassThrough } from "stream";
 import { createReadableStreamFromReadable } from "@remix-run/node";
-import { RemixServer, Meta, Links, Outlet, ScrollRestoration, Scripts, useLoaderData, useActionData, useSubmit, useNavigation, json, useRouteError, isRouteErrorResponse, useLocation, Link } from "@remix-run/react";
+import { RemixServer, Meta, Links, Outlet, ScrollRestoration, Scripts, useRouteError, isRouteErrorResponse, useLoaderData, useActionData, useSubmit, useNavigation, json, useNavigate, useLocation, Link } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
-import { useIndexResourceState, Page, Layout, Banner, Text, Card, BlockStack, FormLayout, Select, ChoiceList, InlineStack, Button, IndexTable, Thumbnail, Badge, EmptyState, DataTable, ProgressBar, Grid, Box, Modal, TextField } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { Page, Card, EmptyState, Text, useIndexResourceState, Layout, Banner, BlockStack, FormLayout, Select, ChoiceList, InlineStack, Button, IndexTable, Thumbnail, Badge, List, DataTable, ProgressBar, Grid, Box, ButtonGroup, Tabs, Tooltip, TextField } from "@shopify/polaris";
+import { useState, useCallback, useMemo } from "react";
 import "@shopify/shopify-app-remix/adapters/node";
 import { shopifyApp, AppDistribution, ApiVersion } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
@@ -504,8 +504,41 @@ function App() {
     ] })
   ] });
 }
+function ErrorBoundary$1() {
+  const error = useRouteError();
+  let title = "Something went wrong";
+  let description = "An unexpected error occurred. Please try again.";
+  if (isRouteErrorResponse(error)) {
+    title = `Error ${error.status}`;
+    description = error.status === 404 ? "The page you're looking for doesn't exist." : error.status === 403 ? "You don't have permission to access this page." : error.statusText || description;
+  } else if (error instanceof Error) {
+    description = error.message || description;
+  }
+  return /* @__PURE__ */ jsxs("html", { lang: "en", children: [
+    /* @__PURE__ */ jsxs("head", { children: [
+      /* @__PURE__ */ jsx("meta", { charSet: "utf-8" }),
+      /* @__PURE__ */ jsx("meta", { name: "viewport", content: "width=device-width, initial-scale=1" }),
+      /* @__PURE__ */ jsx("title", { children: "AltOptimizer - Error" }),
+      /* @__PURE__ */ jsx(Meta, {}),
+      /* @__PURE__ */ jsx(Links, {}),
+      /* @__PURE__ */ jsx("link", { rel: "stylesheet", href: polarisStyles })
+    ] }),
+    /* @__PURE__ */ jsxs("body", { children: [
+      /* @__PURE__ */ jsx(AppProvider, { i18n: en, isEmbeddedApp: true, children: /* @__PURE__ */ jsx(Page, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsx(
+        EmptyState,
+        {
+          heading: title,
+          action: { content: "Try Again", onAction: () => window.location.reload() },
+          children: /* @__PURE__ */ jsx(Text, { as: "p", children: description })
+        }
+      ) }) }) }),
+      /* @__PURE__ */ jsx(Scripts, {})
+    ] })
+  ] });
+}
 const route0 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
+  ErrorBoundary: ErrorBoundary$1,
   default: App,
   links
 }, Symbol.toStringTag, { value: "Module" }));
@@ -1151,7 +1184,14 @@ function GeneratePage() {
         ] })
       }
     ) }),
-    actionData && actionData.success && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Generation complete", tone: "success", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "generated" in actionData ? `Successfully generated ${actionData.generated} of ${actionData.total} alt texts.` : "Operation completed successfully." }) }) }),
+    actionData && actionData.success && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Generation complete", tone: "success", onDismiss: () => {
+    }, children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+      /* @__PURE__ */ jsx(Text, { as: "p", children: "generated" in actionData ? `Successfully generated ${actionData.generated} of ${actionData.total} alt texts.` : "Operation completed successfully." }),
+      "results" in actionData && actionData.results && /* @__PURE__ */ jsx(Fragment, { children: actionData.results.filter((r) => !r.success).length > 0 && /* @__PURE__ */ jsxs(Text, { as: "p", tone: "critical", children: [
+        actionData.results.filter((r) => !r.success).length,
+        " failed. See details below."
+      ] }) })
+    ] }) }) }),
     actionData && !actionData.success && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Error", tone: "critical", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "error" in actionData ? actionData.error : "An error occurred." }) }) }),
     /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
       /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Generation Settings" }),
@@ -1192,6 +1232,7 @@ function GeneratePage() {
               variant: "primary",
               onClick: handleGenerate,
               disabled: isGenerating || products.length === 0,
+              loading: isGenerating,
               children: isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`
             }
           )
@@ -1201,53 +1242,85 @@ function GeneratePage() {
     /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
       /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Eligible Products" }),
       /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Select specific products or leave all selected to generate for all eligible items." }),
-      products.length === 0 ? /* @__PURE__ */ jsx(Text, { as: "p", alignment: "center", children: "All products have alt text. No generation needed." }) : /* @__PURE__ */ jsx(
-        IndexTable,
-        {
-          resourceName: { singular: "product", plural: "products" },
-          itemCount: products.length,
-          selectedItemsCount: selectedResources.selectedItemsCount,
-          headings: [
-            { title: "Image" },
-            { title: "Product" },
-            { title: "Images Needing Alt" }
-          ],
-          ...selectedResources,
-          children: products.map((product, index) => {
-            var _a;
-            return /* @__PURE__ */ jsxs(
-              IndexTable.Row,
-              {
-                id: String(product.id),
-                selected: selectedResources.selectedResources.includes(String(product.id)),
-                position: index,
-                children: [
-                  /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
-                    Thumbnail,
-                    {
-                      source: ((_a = product.images[0]) == null ? void 0 : _a.src) || "",
-                      alt: product.title,
-                      size: "small"
-                    }
-                  ) }),
-                  /* @__PURE__ */ jsxs(IndexTable.Cell, { children: [
-                    /* @__PURE__ */ jsx(Text, { as: "p", fontWeight: "semibold", children: product.title }),
-                    /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-                      "/",
-                      product.handle
-                    ] })
-                  ] }),
-                  /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsxs(Badge, { children: [
-                    product.images.length,
-                    " images"
-                  ] }) })
-                ]
-              },
-              product.id
-            );
-          })
-        }
-      )
+      products.length === 0 ? /* @__PURE__ */ jsx(Text, { as: "p", alignment: "center", children: "All products have alt text. No generation needed." }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+        /* @__PURE__ */ jsx(
+          IndexTable,
+          {
+            resourceName: { singular: "product", plural: "products" },
+            itemCount: products.length,
+            selectedItemsCount: selectedResources.selectedItemsCount,
+            headings: [
+              { title: "Image" },
+              { title: "Product" },
+              { title: "Images Needing Alt" }
+            ],
+            ...selectedResources,
+            children: products.map((product, index) => {
+              var _a;
+              return /* @__PURE__ */ jsxs(
+                IndexTable.Row,
+                {
+                  id: String(product.id),
+                  selected: selectedResources.selectedResources.includes(String(product.id)),
+                  position: index,
+                  children: [
+                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
+                      Thumbnail,
+                      {
+                        source: ((_a = product.images[0]) == null ? void 0 : _a.src) || "",
+                        alt: product.title,
+                        size: "small"
+                      }
+                    ) }),
+                    /* @__PURE__ */ jsxs(IndexTable.Cell, { children: [
+                      /* @__PURE__ */ jsx(Text, { as: "p", fontWeight: "semibold", children: product.title }),
+                      /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+                        "/",
+                        product.handle
+                      ] })
+                    ] }),
+                    /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsxs(Badge, { children: [
+                      product.images.length,
+                      " images"
+                    ] }) })
+                  ]
+                },
+                product.id
+              );
+            })
+          }
+        ),
+        (actionData == null ? void 0 : actionData.success) && "results" in actionData && actionData.results && /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsx(Text, { as: "h3", variant: "headingSm", children: "Generation Results" }),
+          actionData.results.filter((r) => !r.success).length > 0 && /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx(Banner, { tone: "critical", title: "Some items failed", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "The following items encountered errors. You can retry them individually." }) }),
+            /* @__PURE__ */ jsx(List, { type: "bullet", children: actionData.results.filter((r) => !r.success).map((r) => /* @__PURE__ */ jsx(List.Item, { children: /* @__PURE__ */ jsxs(InlineStack, { gap: "200", wrap: false, align: "space-between", children: [
+              /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "critical", children: [
+                "Image #",
+                r.imageId,
+                ": ",
+                r.error || "Unknown error"
+              ] }),
+              /* @__PURE__ */ jsx(
+                Button,
+                {
+                  size: "slim",
+                  variant: "plain",
+                  onClick: () => {
+                    const fd = new FormData();
+                    fd.set("intent", "generate_alt");
+                    fd.set("autoApply", autoApply);
+                    fd.append("imageIds", String(r.imageId));
+                    submit(fd, { method: "post" });
+                  },
+                  children: "Retry"
+                }
+              )
+            ] }) }, r.imageId)) })
+          ] }),
+          actionData.results.filter((r) => r.success).length > 0 && /* @__PURE__ */ jsx(Banner, { tone: "success", title: `${actionData.results.filter((r) => r.success).length} generated successfully` })
+        ] }) })
+      ] })
     ] }) }) })
   ] }) });
 }
@@ -1807,70 +1880,151 @@ const loader$4 = async ({ request }) => {
     getDashboardStats(shop.id),
     getCurrentUsage(shop.id)
   ]);
+  const isNewUser = stats.totalProducts === 0;
+  const needsReview = stats.imagesPending > 0;
+  const hasAiGenerated = stats.imagesWithAi > 0;
   return {
     stats,
     usage,
     shopDomain: session.shop,
-    planType: shop.planType
+    planType: shop.planType,
+    isNewUser,
+    needsReview,
+    hasAiGenerated,
+    imagesWithoutAlt: stats.totalImages - stats.imagesWithAlt
   };
 };
 function DashboardIndex() {
-  const { stats, usage, shopDomain, planType } = useLoaderData();
+  const { stats, usage, shopDomain, planType, isNewUser, needsReview, hasAiGenerated, imagesWithoutAlt } = useLoaderData();
+  const navigate = useNavigate();
   const quotaWarning = usage.percentage >= 80;
   const quotaCritical = usage.percentage >= 95;
+  const altTextCoverage = stats.totalImages > 0 ? Math.round(stats.imagesWithAlt / stats.totalImages * 100) : 0;
   return /* @__PURE__ */ jsx(Page, { title: "Dashboard", subtitle: `Connected to ${shopDomain}`, children: /* @__PURE__ */ jsxs(Layout, { children: [
     quotaWarning && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
       Banner,
       {
-        title: quotaCritical ? "Quota almost exhausted" : "Approaching monthly quota limit",
+        title: quotaCritical ? "Quota almost exhausted — upgrade to continue generating" : `Approaching your ${usage.planName} plan limit`,
         tone: quotaCritical ? "critical" : "warning",
+        action: {
+          content: "Upgrade Plan",
+          url: "/app/settings"
+        },
         children: /* @__PURE__ */ jsxs(Text, { as: "p", children: [
-          "You have used ",
+          "You've used ",
           usage.percentage,
-          "% of your ",
-          usage.planName,
-          " plan quota (",
+          "% of your monthly quota (",
           usage.imagesGenerated,
           "/",
           usage.quota,
           " images).",
-          quotaCritical && " Consider upgrading your plan."
+          quotaCritical && " Upgrade to avoid interruptions."
         ] })
       }
     ) }),
-    /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsxs(Grid, { columns: { xs: 1, sm: 2, md: 3, lg: 3, xl: 3 }, children: [
+    isNewUser && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
+      Banner,
+      {
+        title: "Welcome to AltOptimizer!",
+        tone: "info",
+        children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", children: "Get started in 3 simple steps:" }),
+          /* @__PURE__ */ jsxs(List, { type: "number", children: [
+            /* @__PURE__ */ jsxs(List.Item, { children: [
+              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Sync your products" }),
+              " — Import all products from your Shopify store"
+            ] }),
+            /* @__PURE__ */ jsxs(List.Item, { children: [
+              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Generate AI alt text" }),
+              " — Let GPT-4o analyze your product images and suggest SEO-optimized alt text"
+            ] }),
+            /* @__PURE__ */ jsxs(List.Item, { children: [
+              /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Review & apply" }),
+              " — Review suggestions, edit if needed, and apply with one click"
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxs(InlineStack, { gap: "200", wrap: false, children: [
+            /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => navigate("/app/products"), children: "Sync Products Now" }),
+            /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/generate"), children: "Generate Alt Text" })
+          ] })
+        ] })
+      }
+    ) }),
+    needsReview && !isNewUser && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
+      Banner,
+      {
+        title: `${stats.imagesPending} images pending review`,
+        tone: "info",
+        action: {
+          content: "Review Now",
+          url: "/app/review"
+        },
+        children: /* @__PURE__ */ jsx(Text, { as: "p", children: "AI-generated alt text is ready for your review. Review and apply to optimize your store's SEO." })
+      }
+    ) }),
+    /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsxs(Grid, { columns: { xs: 1, sm: 2, md: 4, lg: 4, xl: 4 }, children: [
       /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
         /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Total Products" }),
-        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalProducts })
+        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalProducts }),
+        /* @__PURE__ */ jsx(Box, { minHeight: "20px", children: stats.totalProducts > 0 && /* @__PURE__ */ jsx(Button, { variant: "plain", size: "slim", onClick: () => navigate("/app/products"), children: "View all" }) })
       ] }) }) }),
       /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
         /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Total Images" }),
-        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalImages })
+        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.totalImages }),
+        /* @__PURE__ */ jsx(Box, { minHeight: "20px", children: imagesWithoutAlt > 0 && /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "critical", children: [
+          imagesWithoutAlt,
+          " without alt text"
+        ] }) })
       ] }) }) }),
       /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Images with Alt Text" }),
-        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.imagesWithAlt }),
+        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Alt Text Coverage" }),
+        /* @__PURE__ */ jsxs(InlineStack, { gap: "200", blockAlign: "center", children: [
+          /* @__PURE__ */ jsxs(Text, { as: "h1", variant: "heading2xl", children: [
+            altTextCoverage,
+            "%"
+          ] }),
+          /* @__PURE__ */ jsx(Badge, { tone: altTextCoverage >= 80 ? "success" : altTextCoverage >= 50 ? "warning" : "critical", children: altTextCoverage >= 80 ? "Good" : altTextCoverage >= 50 ? "Fair" : "Needs work" })
+        ] }),
         /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
-          stats.totalImages > 0 ? Math.round(stats.imagesWithAlt / stats.totalImages * 100) : 0,
-          "% coverage"
+          stats.imagesWithAlt,
+          " of ",
+          stats.totalImages,
+          " images have alt text"
         ] })
+      ] }) }) }),
+      /* @__PURE__ */ jsx(Grid.Cell, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+        /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "AI Generated" }),
+        /* @__PURE__ */ jsx(Text, { as: "h1", variant: "heading2xl", children: stats.imagesWithAi }),
+        /* @__PURE__ */ jsx(Box, { minHeight: "20px", children: stats.imagesPending > 0 && /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "info", children: [
+          stats.imagesPending,
+          " pending review"
+        ] }) })
       ] }) }) })
     ] }) }),
     /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
-      /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "AI Generation Status" }),
+      /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+        /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "AI Generation Usage" }),
+        /* @__PURE__ */ jsx(Badge, { children: usage.planName })
+      ] }),
       /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
         /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Images Generated (This Month)" }),
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Monthly Usage" }),
           /* @__PURE__ */ jsxs(Badge, { tone: quotaCritical ? "critical" : quotaWarning ? "warning" : "success", children: [
             usage.imagesGenerated,
             " / ",
             usage.quota
           ] })
         ] }),
-        /* @__PURE__ */ jsx(ProgressBar, { progress: usage.percentage / 100 }),
+        /* @__PURE__ */ jsx(
+          ProgressBar,
+          {
+            progress: Math.min(usage.percentage, 100) / 100,
+            tone: quotaCritical ? "critical" : quotaWarning ? "warning" : "success"
+          }
+        ),
         /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
           usage.quota - usage.imagesGenerated,
-          " remaining"
+          " generations remaining this month"
         ] })
       ] }),
       /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
@@ -1880,26 +2034,73 @@ function DashboardIndex() {
         ] }),
         /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
           /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Pending Review" }),
-          /* @__PURE__ */ jsx(Badge, { tone: "info", children: stats.imagesPending })
+          /* @__PURE__ */ jsx(Badge, { tone: stats.imagesPending > 0 ? "info" : "success", children: stats.imagesPending > 0 ? `${stats.imagesPending} pending` : "All reviewed" })
+        ] }),
+        /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
+          /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: "Alt Text Coverage" }),
+          /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: [
+            altTextCoverage,
+            "%"
+          ] })
         ] })
       ] })
     ] }) }) }),
     /* @__PURE__ */ jsx(Layout.Section, { variant: "oneHalf", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
       /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Quick Actions" }),
       /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
-        /* @__PURE__ */ jsx(Button, { url: "/app/products", variant: "primary", children: "View Products" }),
-        /* @__PURE__ */ jsx(Button, { url: "/app/generate", children: "Generate Alt Text" }),
-        /* @__PURE__ */ jsx(Button, { url: "/app/review", children: "Review Suggestions" }),
-        /* @__PURE__ */ jsx(Button, { url: "/app/backup", children: "Backup Data" })
+        /* @__PURE__ */ jsxs(ButtonGroup, { fullWidth: true, children: [
+          /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/products"), variant: "primary", children: "Sync & View Products" }),
+          /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/generate"), children: "Generate Alt Text" })
+        ] }),
+        /* @__PURE__ */ jsxs(ButtonGroup, { fullWidth: true, children: [
+          /* @__PURE__ */ jsxs(Button, { onClick: () => navigate("/app/review"), disabled: !hasAiGenerated, children: [
+            "Review Suggestions",
+            !hasAiGenerated && " (no suggestions yet)"
+          ] }),
+          /* @__PURE__ */ jsx(Button, { onClick: () => navigate("/app/backup"), children: "Backup Data" })
+        ] })
       ] })
     ] }) }) }),
     /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "300", children: [
-      /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", children: [
-        /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Current Plan" }),
+      /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", children: [
+        /* @__PURE__ */ jsxs(BlockStack, { gap: "100", children: [
+          /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Current Plan" }),
+          /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+            usage.planName,
+            " — ",
+            usage.quota,
+            " image generations per month"
+          ] })
+        ] }),
         /* @__PURE__ */ jsx(Badge, { tone: "info", children: usage.planName })
       ] }),
-      /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: planType === "free" ? "You are on the Free plan. Upgrade to generate more alt texts and unlock advanced features." : `You are on the ${usage.planName} plan with ${usage.quota} image generations per month.` }),
-      /* @__PURE__ */ jsx(Box, { children: /* @__PURE__ */ jsx(Button, { url: "/app/settings", variant: "plain", children: "Manage Plan" }) })
+      planType === "free" && /* @__PURE__ */ jsx(
+        Box,
+        {
+          padding: "300",
+          borderRadius: "200",
+          background: "bg-surface-secondary",
+          children: /* @__PURE__ */ jsxs(BlockStack, { gap: "200", children: [
+            /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: "Upgrade to unlock more generations" }),
+            /* @__PURE__ */ jsxs(List, { type: "bullet", children: [
+              /* @__PURE__ */ jsxs(List.Item, { children: [
+                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Starter ($9/mo):" }),
+                " 300 images/month — perfect for small shops"
+              ] }),
+              /* @__PURE__ */ jsxs(List.Item, { children: [
+                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Professional ($19/mo):" }),
+                " 1,000 images/month for growing stores"
+              ] }),
+              /* @__PURE__ */ jsxs(List.Item, { children: [
+                /* @__PURE__ */ jsx(Text, { as: "span", fontWeight: "semibold", children: "Business ($49/mo):" }),
+                " 5,000 images/month for large catalogs"
+              ] })
+            ] }),
+            /* @__PURE__ */ jsx(Button, { variant: "primary", onClick: () => navigate("/app/settings"), children: "Upgrade Plan" })
+          ] })
+        }
+      ),
+      planType !== "free" && /* @__PURE__ */ jsx(Box, { children: /* @__PURE__ */ jsx(Button, { variant: "plain", onClick: () => navigate("/app/settings"), children: "Manage Plan" }) })
     ] }) }) })
   ] }) });
 }
@@ -2235,6 +2436,9 @@ const loader$2 = async ({ request }) => {
     orderBy: { id: "desc" },
     take: 100
   });
+  const allWithAi = await prisma.productImage.count({
+    where: { altTextAi: { not: null } }
+  });
   const counts = await prisma.productImage.groupBy({
     by: ["status"],
     where: { altTextAi: { not: null } },
@@ -2250,6 +2454,7 @@ const loader$2 = async ({ request }) => {
       statusCounts[group.status] = group._count;
     }
   }
+  const reviewed = (statusCounts.approved || 0) + (statusCounts.rejected || 0);
   return {
     images: images.map((img) => ({
       id: img.id,
@@ -2262,7 +2467,9 @@ const loader$2 = async ({ request }) => {
       productHandle: img.product.handle
     })),
     filter,
-    statusCounts
+    statusCounts,
+    totalWithAi: allWithAi,
+    reviewed
   };
 };
 const action$1 = async ({ request }) => {
@@ -2275,120 +2482,188 @@ const action$1 = async ({ request }) => {
   }
   const formData = await request.formData();
   const intent = formData.get("intent");
-  if (intent === "approve") {
-    const imageIds = formData.getAll("imageIds");
-    let approved = 0;
-    for (const imageIdStr of imageIds) {
-      const imageId = parseInt(imageIdStr, 10);
+  try {
+    if (intent === "approve") {
+      const imageIds = formData.getAll("imageIds");
+      let approved = 0;
+      let errors = 0;
+      for (const imageIdStr of imageIds) {
+        const imageId = parseInt(imageIdStr, 10);
+        const image = await prisma.productImage.findUnique({
+          where: { id: imageId }
+        });
+        if (!image || !image.altTextAi) continue;
+        const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
+        if (success) {
+          await prisma.productImage.update({
+            where: { id: imageId },
+            data: {
+              altTextOriginal: image.altTextAi,
+              status: "applied"
+            }
+          });
+          await prisma.altTextHistory.create({
+            data: {
+              imageId,
+              altText: image.altTextAi,
+              source: "ai"
+            }
+          });
+          approved++;
+        } else {
+          errors++;
+        }
+      }
+      return json({ success: true, approved, errors, intent: "approve" });
+    }
+    if (intent === "reject") {
+      const imageIds = formData.getAll("imageIds");
+      for (const imageIdStr of imageIds) {
+        const imageId = parseInt(imageIdStr, 10);
+        await prisma.productImage.update({
+          where: { id: imageId },
+          data: { status: "rejected" }
+        });
+      }
+      return json({ success: true, rejected: imageIds.length, intent: "reject" });
+    }
+    if (intent === "edit") {
+      const imageId = parseInt(formData.get("imageId"), 10);
+      const newAltText = formData.get("altText");
+      if (!newAltText || newAltText.trim().length === 0) {
+        return json({ success: false, error: "Alt text cannot be empty", intent: "edit" });
+      }
+      if (newAltText.length > 125) {
+        return json({ success: false, error: "Alt text must be 125 characters or less", intent: "edit" });
+      }
       const image = await prisma.productImage.findUnique({
         where: { id: imageId }
       });
-      if (!image || !image.altTextAi) continue;
-      const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
-      if (success) {
-        await prisma.productImage.update({
-          where: { id: imageId },
-          data: {
-            altTextOriginal: image.altTextAi,
-            status: "applied"
-          }
-        });
-        await prisma.altTextHistory.create({
-          data: {
-            imageId,
-            altText: image.altTextAi,
-            source: "ai"
-          }
-        });
-        approved++;
+      if (!image) {
+        return json({ success: false, error: "Image not found", intent: "edit" });
       }
-    }
-    return json({ success: true, approved });
-  }
-  if (intent === "reject") {
-    const imageIds = formData.getAll("imageIds");
-    for (const imageIdStr of imageIds) {
-      const imageId = parseInt(imageIdStr, 10);
       await prisma.productImage.update({
         where: { id: imageId },
-        data: { status: "rejected" }
+        data: { altTextAi: newAltText.trim() }
       });
-    }
-    return json({ success: true, rejected: imageIds.length });
-  }
-  if (intent === "edit") {
-    const imageId = parseInt(formData.get("imageId"), 10);
-    const newAltText = formData.get("altText");
-    const image = await prisma.productImage.findUnique({
-      where: { id: imageId }
-    });
-    if (!image) {
-      return json({ success: false, error: "Image not found" });
-    }
-    await prisma.productImage.update({
-      where: { id: imageId },
-      data: { altTextAi: newAltText }
-    });
-    const autoApply = formData.get("autoApply") === "true";
-    if (autoApply) {
-      const success = await updateImageAltText(admin, image.shopifyImageId, newAltText);
-      if (success) {
-        await prisma.productImage.update({
-          where: { id: imageId },
-          data: {
-            altTextOriginal: newAltText,
-            status: "applied"
-          }
-        });
+      const autoApply = formData.get("autoApply") === "true";
+      if (autoApply) {
+        const success = await updateImageAltText(admin, image.shopifyImageId, newAltText.trim());
+        if (success) {
+          await prisma.productImage.update({
+            where: { id: imageId },
+            data: {
+              altTextOriginal: newAltText.trim(),
+              status: "applied"
+            }
+          });
+        }
       }
+      return json({ success: true, intent: "edit" });
     }
-    return json({ success: true });
-  }
-  if (intent === "bulk_approve") {
-    const pendingImages = await prisma.productImage.findMany({
-      where: {
-        product: { shopId: shop.id },
-        status: "pending",
-        altTextAi: { not: null }
+    if (intent === "bulk_approve") {
+      const pendingImages = await prisma.productImage.findMany({
+        where: {
+          product: { shopId: shop.id },
+          status: "pending",
+          altTextAi: { not: null }
+        }
+      });
+      let approved = 0;
+      let errors = 0;
+      for (const image of pendingImages) {
+        if (!image.altTextAi) continue;
+        const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
+        if (success) {
+          await prisma.productImage.update({
+            where: { id: image.id },
+            data: {
+              altTextOriginal: image.altTextAi,
+              status: "applied"
+            }
+          });
+          approved++;
+        } else {
+          errors++;
+        }
       }
-    });
-    let approved = 0;
-    for (const image of pendingImages) {
-      if (!image.altTextAi) continue;
-      const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
-      if (success) {
+      return json({ success: true, approved, errors, intent: "bulk_approve" });
+    }
+    if (intent === "bulk_reject") {
+      const pendingImages = await prisma.productImage.findMany({
+        where: {
+          product: { shopId: shop.id },
+          status: "pending",
+          altTextAi: { not: null }
+        }
+      });
+      for (const image of pendingImages) {
         await prisma.productImage.update({
           where: { id: image.id },
-          data: {
-            altTextOriginal: image.altTextAi,
-            status: "applied"
-          }
+          data: { status: "rejected" }
         });
-        approved++;
       }
+      return json({ success: true, rejected: pendingImages.length, intent: "bulk_reject" });
     }
-    return json({ success: true, approved });
+    return json({ success: false, error: "Unknown action", intent: "unknown" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "An unexpected error occurred";
+    return json({ success: false, error: message, intent });
   }
-  return json({ success: false, error: "Unknown action" });
 };
+function StatusBadge({ status }) {
+  const config = {
+    applied: { tone: "success", label: "Applied" },
+    pending: { tone: "info", label: "Pending" },
+    rejected: { tone: "critical", label: "Rejected" },
+    generated: { tone: "warning", label: "Generated" }
+  };
+  const c = config[status] || { tone: "info", label: status };
+  return /* @__PURE__ */ jsx(Badge, { tone: c.tone, children: c.label });
+}
 function ReviewPage() {
-  const { images, filter, statusCounts } = useLoaderData();
+  const { images, filter, statusCounts, totalWithAi, reviewed } = useLoaderData();
   const actionData = useActionData();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isProcessing = navigation.state !== "idle";
   const [selectedFilter, setSelectedFilter] = useState(filter);
-  const [editingImage, setEditingImage] = useState(null);
-  const [editValue, setEditValue] = useState("");
   const [selectedResources, setSelectedResources] = useState([]);
+  const [editingRow, setEditingRow] = useState(null);
+  const [editValue, setEditValue] = useState("");
+  const [toast, setToast] = useState(null);
+  useMemo(() => {
+    if (actionData == null ? void 0 : actionData.success) {
+      const ad = actionData;
+      if (ad.intent === "approve" || ad.intent === "bulk_approve") {
+        const msg = ad.errors > 0 ? `Approved ${ad.approved} images (${ad.errors} failed to sync to Shopify)` : `Successfully approved ${ad.approved} images`;
+        setToast({ message: msg, tone: ad.errors > 0 ? "warning" : "success" });
+      } else if (ad.intent === "reject" || ad.intent === "bulk_reject") {
+        setToast({ message: `Rejected ${ad.rejected} images`, tone: "success" });
+      } else if (ad.intent === "edit") {
+        setToast({ message: "Alt text updated successfully", tone: "success" });
+      }
+    } else if (actionData && !actionData.success) {
+      setToast({ message: actionData.error || "Operation failed", tone: "critical" });
+    }
+  }, [actionData]);
+  const tabs = useMemo(() => [
+    { id: "pending", content: `Pending (${statusCounts.pending || 0})` },
+    { id: "approved", content: `Applied (${statusCounts.approved || 0})` },
+    { id: "rejected", content: `Rejected (${statusCounts.rejected || 0})` },
+    { id: "all", content: "All" }
+  ], [statusCounts]);
+  const selectedTabIndex = tabs.findIndex((t) => t.id === selectedFilter);
   const handleFilterChange = useCallback(
-    (value) => {
-      setSelectedFilter(value);
+    (selectedTabIndex2) => {
+      const newFilter = tabs[selectedTabIndex2].id;
+      setSelectedFilter(newFilter);
+      setSelectedResources([]);
       const params = new URLSearchParams();
-      if (value !== "pending") params.set("filter", value);
+      if (newFilter !== "pending") params.set("filter", newFilter);
       submit(params, { method: "get" });
     },
-    [submit]
+    [submit, tabs]
   );
   const handleApprove = useCallback(
     (ids) => {
@@ -2413,20 +2688,31 @@ function ReviewPage() {
     formData.set("intent", "bulk_approve");
     submit(formData, { method: "post" });
   }, [submit]);
-  const handleEdit = useCallback((id, altText) => {
-    setEditingImage({ id, altText });
+  const handleBulkReject = useCallback(() => {
+    const formData = new FormData();
+    formData.set("intent", "bulk_reject");
+    submit(formData, { method: "post" });
+  }, [submit]);
+  const handleStartEdit = useCallback((id, altText) => {
+    setEditingRow({ id, altText });
     setEditValue(altText);
   }, []);
   const handleSaveEdit = useCallback(() => {
-    if (!editingImage) return;
+    if (!editingRow) return;
+    if (!editValue.trim()) return;
+    if (editValue.length > 125) return;
     const formData = new FormData();
     formData.set("intent", "edit");
-    formData.set("imageId", String(editingImage.id));
-    formData.set("altText", editValue);
+    formData.set("imageId", String(editingRow.id));
+    formData.set("altText", editValue.trim());
     formData.set("autoApply", "true");
     submit(formData, { method: "post" });
-    setEditingImage(null);
-  }, [editingImage, editValue, submit]);
+    setEditingRow(null);
+  }, [editingRow, editValue, submit]);
+  const handleCancelEdit = useCallback(() => {
+    setEditingRow(null);
+    setEditValue("");
+  }, []);
   useCallback((id) => {
     setSelectedResources(
       (prev) => prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
@@ -2439,198 +2725,205 @@ function ReviewPage() {
       setSelectedResources(images.map((img) => String(img.id)));
     }
   }, [images, selectedResources.length]);
-  return /* @__PURE__ */ jsxs(
+  const progressPercent = totalWithAi > 0 ? Math.round(reviewed / totalWithAi * 100) : 0;
+  const pendingCount = statusCounts.pending || 0;
+  const isEditingRow = editingRow !== null;
+  return /* @__PURE__ */ jsx(
     Page,
     {
       title: "Review & Approve",
       subtitle: "Review AI-generated alt text before applying to your store",
-      primaryAction: statusCounts.pending > 0 ? /* @__PURE__ */ jsxs(Button, { variant: "primary", onClick: handleBulkApprove, disabled: isProcessing, children: [
-        "Approve All Pending (",
-        statusCounts.pending,
-        ")"
-      ] }) : void 0,
-      children: [
-        /* @__PURE__ */ jsxs(Layout, { children: [
-          (actionData == null ? void 0 : actionData.success) && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Banner, { title: "Success", tone: "success", children: /* @__PURE__ */ jsx(Text, { as: "p", children: "approved" in actionData ? `Approved ${actionData.approved} images.` : "Operation completed successfully." }) }) }),
-          /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
-            /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", children: [
-              /* @__PURE__ */ jsxs(InlineStack, { gap: "300", children: [
-                /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Alt Text Review" }),
-                /* @__PURE__ */ jsxs(InlineStack, { gap: "100", children: [
-                  /* @__PURE__ */ jsxs(Badge, { tone: "info", children: [
-                    "Pending: ",
-                    statusCounts.pending
-                  ] }),
-                  /* @__PURE__ */ jsxs(Badge, { tone: "success", children: [
-                    "Applied: ",
-                    statusCounts.approved
-                  ] }),
-                  /* @__PURE__ */ jsxs(Badge, { tone: "critical", children: [
-                    "Rejected: ",
-                    statusCounts.rejected
-                  ] })
-                ] })
+      children: /* @__PURE__ */ jsxs(Layout, { children: [
+        toast && /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(
+          Banner,
+          {
+            title: toast.message,
+            tone: toast.tone,
+            onDismiss: () => setToast(null)
+          }
+        ) }),
+        /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+          /* @__PURE__ */ jsxs(InlineStack, { align: "space-between", blockAlign: "center", children: [
+            /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: "Review Progress" }),
+            /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", tone: "subdued", children: [
+              reviewed,
+              " of ",
+              totalWithAi,
+              " reviewed"
+            ] })
+          ] }),
+          /* @__PURE__ */ jsx(ProgressBar, { progress: progressPercent, tone: progressPercent === 100 ? "success" : "info" })
+        ] }) }) }),
+        /* @__PURE__ */ jsx(Layout.Section, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "400", children: [
+          /* @__PURE__ */ jsx(Tabs, { tabs, selected: selectedTabIndex, onSelect: handleFilterChange }),
+          /* @__PURE__ */ jsx(InlineStack, { align: "space-between", blockAlign: "center", children: /* @__PURE__ */ jsxs(InlineStack, { gap: "200", children: [
+            selectedResources.length > 0 && /* @__PURE__ */ jsxs(Fragment, { children: [
+              /* @__PURE__ */ jsxs(Text, { as: "p", variant: "bodySm", fontWeight: "semibold", children: [
+                selectedResources.length,
+                " selected"
               ] }),
-              /* @__PURE__ */ jsx(
-                Select,
-                {
-                  label: "",
-                  labelInline: true,
-                  options: [
-                    { label: "Pending Review", value: "pending" },
-                    { label: "All", value: "all" },
-                    { label: "Applied", value: "approved" },
-                    { label: "Rejected", value: "rejected" }
-                  ],
-                  value: selectedFilter,
-                  onChange: handleFilterChange
-                }
-              )
-            ] }),
-            images.length === 0 ? /* @__PURE__ */ jsx(EmptyState, { heading: "No images to review", children: /* @__PURE__ */ jsx(Text, { as: "p", children: filter === "pending" ? "All images have been reviewed. Generate more alt text to review." : "No images match the selected filter." }) }) : /* @__PURE__ */ jsxs(Fragment, { children: [
-              /* @__PURE__ */ jsxs(InlineStack, { gap: "200", children: [
-                /* @__PURE__ */ jsxs(
+              /* @__PURE__ */ jsxs(ButtonGroup, { children: [
+                /* @__PURE__ */ jsx(
                   Button,
                   {
                     onClick: () => handleApprove(selectedResources),
-                    disabled: selectedResources.length === 0 || isProcessing,
+                    disabled: isProcessing,
                     variant: "primary",
-                    children: [
-                      "Approve Selected (",
-                      selectedResources.length,
-                      ")"
-                    ]
+                    size: "slim",
+                    children: "Approve"
                   }
                 ),
                 /* @__PURE__ */ jsx(
                   Button,
                   {
                     onClick: () => handleReject(selectedResources),
-                    disabled: selectedResources.length === 0 || isProcessing,
+                    disabled: isProcessing,
                     tone: "critical",
-                    children: "Reject Selected"
+                    size: "slim",
+                    children: "Reject"
                   }
                 )
-              ] }),
-              /* @__PURE__ */ jsx(
-                IndexTable,
+              ] })
+            ] }),
+            pendingCount > 0 && selectedResources.length === 0 && /* @__PURE__ */ jsxs(ButtonGroup, { children: [
+              /* @__PURE__ */ jsx(Tooltip, { content: "Approve all pending images and apply to Shopify store", children: /* @__PURE__ */ jsxs(
+                Button,
                 {
-                  resourceName: { singular: "image", plural: "images" },
-                  itemCount: images.length,
-                  selectedItemsCount: selectedResources.length,
-                  onSelectionChange: (selectionType, toggleIds) => {
-                    if (selectionType === "page") {
-                      toggleAll();
-                    }
+                  onClick: handleBulkApprove,
+                  disabled: isProcessing,
+                  variant: "primary",
+                  size: "slim",
+                  children: [
+                    "Approve All (",
+                    pendingCount,
+                    ")"
+                  ]
+                }
+              ) }),
+              /* @__PURE__ */ jsx(Tooltip, { content: "Reject all pending images", children: /* @__PURE__ */ jsx(
+                Button,
+                {
+                  onClick: handleBulkReject,
+                  disabled: isProcessing,
+                  tone: "critical",
+                  size: "slim",
+                  children: "Reject All"
+                }
+              ) })
+            ] })
+          ] }) }),
+          images.length === 0 ? /* @__PURE__ */ jsx(EmptyState, { heading: "No images to review", children: /* @__PURE__ */ jsx(Text, { as: "p", children: filter === "pending" ? "All images have been reviewed! Generate more alt text or change the filter." : "No images match the selected filter." }) }) : /* @__PURE__ */ jsx(
+            IndexTable,
+            {
+              resourceName: { singular: "image", plural: "images" },
+              itemCount: images.length,
+              selectedItemsCount: selectedResources.length,
+              onSelectionChange: (selectionType) => {
+                if (selectionType === "all") {
+                  toggleAll();
+                }
+              },
+              headings: [
+                { title: "Image" },
+                { title: "Product" },
+                { title: "Current Alt Text" },
+                { title: "AI Suggested" },
+                { title: "Status" },
+                { title: "Actions" }
+              ],
+              hasZebraStriping: true,
+              children: images.map((image, index) => {
+                const isEditingThis = (editingRow == null ? void 0 : editingRow.id) === image.id;
+                return /* @__PURE__ */ jsxs(
+                  IndexTable.Row,
+                  {
+                    id: String(image.id),
+                    selected: selectedResources.includes(String(image.id)),
+                    position: index,
+                    children: [
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
+                        Thumbnail,
+                        {
+                          source: image.src,
+                          alt: image.altTextOriginal || "Product image",
+                          size: "small"
+                        }
+                      ) }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", truncate: true, children: image.productTitle }) }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: image.altTextOriginal ? /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", children: image.altTextOriginal.length > 80 ? image.altTextOriginal.slice(0, 80) + "..." : image.altTextOriginal }) : /* @__PURE__ */ jsx(Text, { as: "span", variant: "bodySm", tone: "subdued", children: "No alt text" }) }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: isEditingThis ? /* @__PURE__ */ jsxs(BlockStack, { gap: "100", children: [
+                        /* @__PURE__ */ jsx(
+                          TextField,
+                          {
+                            label: "",
+                            labelHidden: true,
+                            value: editValue,
+                            onChange: setEditValue,
+                            maxLength: 125,
+                            showCharacterCount: true,
+                            autoComplete: "off",
+                            autoFocus: true
+                          }
+                        ),
+                        /* @__PURE__ */ jsxs(InlineStack, { gap: "100", children: [
+                          /* @__PURE__ */ jsx(Button, { size: "slim", variant: "primary", onClick: handleSaveEdit, disabled: !editValue.trim(), children: "Save" }),
+                          /* @__PURE__ */ jsx(Button, { size: "slim", onClick: handleCancelEdit, children: "Cancel" })
+                        ] })
+                      ] }) : /* @__PURE__ */ jsx(
+                        Box,
+                        {
+                          padding: "100",
+                          background: "bg-surface-secondary",
+                          borderRadius: "200",
+                          minHeight: "32px",
+                          onClick: () => handleStartEdit(image.id, image.altTextAi || ""),
+                          style: { cursor: "pointer" },
+                          children: /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", children: image.altTextAi ? image.altTextAi.length > 80 ? image.altTextAi.slice(0, 80) + "..." : image.altTextAi : /* @__PURE__ */ jsx(Text, { as: "span", tone: "subdued", children: "Not generated" }) })
+                        }
+                      ) }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(StatusBadge, { status: image.status }) }),
+                      /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsxs(ButtonGroup, { children: [
+                        /* @__PURE__ */ jsx(
+                          Button,
+                          {
+                            size: "slim",
+                            variant: "plain",
+                            onClick: () => handleApprove([String(image.id)]),
+                            disabled: image.status === "applied" || isProcessing || isEditingRow,
+                            children: "Approve"
+                          }
+                        ),
+                        /* @__PURE__ */ jsx(
+                          Button,
+                          {
+                            size: "slim",
+                            variant: "plain",
+                            onClick: () => handleStartEdit(image.id, image.altTextAi || ""),
+                            disabled: isEditingRow,
+                            children: "Edit"
+                          }
+                        ),
+                        /* @__PURE__ */ jsx(
+                          Button,
+                          {
+                            size: "slim",
+                            variant: "plain",
+                            tone: "critical",
+                            onClick: () => handleReject([String(image.id)]),
+                            disabled: image.status === "rejected" || isProcessing || isEditingRow,
+                            children: "Reject"
+                          }
+                        )
+                      ] }) })
+                    ]
                   },
-                  headings: [
-                    { title: "Image" },
-                    { title: "Product" },
-                    { title: "Current Alt Text" },
-                    { title: "AI Suggested" },
-                    { title: "Status" },
-                    { title: "Actions" }
-                  ],
-                  children: images.map((image, index) => /* @__PURE__ */ jsxs(
-                    IndexTable.Row,
-                    {
-                      id: String(image.id),
-                      selected: selectedResources.includes(String(image.id)),
-                      position: index,
-                      children: [
-                        /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
-                          Thumbnail,
-                          {
-                            source: image.src,
-                            alt: image.altTextOriginal || "Product image",
-                            size: "small"
-                          }
-                        ) }),
-                        /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", fontWeight: "semibold", children: image.productTitle }) }),
-                        /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", children: image.altTextOriginal || /* @__PURE__ */ jsx(Text, { as: "span", tone: "subdued", children: "No alt text" }) }) }),
-                        /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", color: "success", children: image.altTextAi }) }),
-                        /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsx(
-                          Badge,
-                          {
-                            tone: image.status === "applied" ? "success" : image.status === "rejected" ? "critical" : "info",
-                            children: image.status
-                          }
-                        ) }),
-                        /* @__PURE__ */ jsx(IndexTable.Cell, { children: /* @__PURE__ */ jsxs(InlineStack, { gap: "100", children: [
-                          /* @__PURE__ */ jsx(
-                            Button,
-                            {
-                              size: "slim",
-                              variant: "plain",
-                              onClick: () => handleApprove([String(image.id)]),
-                              disabled: image.status === "applied",
-                              children: "Approve"
-                            }
-                          ),
-                          /* @__PURE__ */ jsx(
-                            Button,
-                            {
-                              size: "slim",
-                              variant: "plain",
-                              onClick: () => handleEdit(image.id, image.altTextAi || ""),
-                              children: "Edit"
-                            }
-                          ),
-                          /* @__PURE__ */ jsx(
-                            Button,
-                            {
-                              size: "slim",
-                              variant: "plain",
-                              tone: "critical",
-                              onClick: () => handleReject([String(image.id)]),
-                              disabled: image.status === "rejected",
-                              children: "Reject"
-                            }
-                          )
-                        ] }) })
-                      ]
-                    },
-                    image.id
-                  ))
-                }
-              )
-            ] })
-          ] }) }) })
-        ] }),
-        editingImage && /* @__PURE__ */ jsx(
-          Modal,
-          {
-            open: true,
-            onClose: () => setEditingImage(null),
-            title: "Edit Alt Text",
-            primaryAction: {
-              content: "Save & Apply",
-              onAction: handleSaveEdit
-            },
-            secondaryActions: [
-              {
-                content: "Cancel",
-                onAction: () => setEditingImage(null)
-              }
-            ],
-            children: /* @__PURE__ */ jsxs(Modal.Section, { children: [
-              /* @__PURE__ */ jsx(
-                TextField,
-                {
-                  label: "Alt Text",
-                  value: editValue,
-                  onChange: setEditValue,
-                  maxLength: 125,
-                  showCharacterCount: true,
-                  multiline: 3,
-                  autoComplete: "off"
-                }
-              ),
-              /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodySm", tone: "subdued", children: "Maximum 125 characters for optimal accessibility." })
-            ] })
-          }
-        )
-      ]
+                  image.id
+                );
+              })
+            }
+          )
+        ] }) }) })
+      ] })
     }
   );
 }
@@ -2640,55 +2933,98 @@ const route6 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   default: ReviewPage,
   loader: loader$2
 }, Symbol.toStringTag, { value: "Module" }));
-const action = async ({ request, params }) => {
-  const { topic, shop, session, admin, payload } = await authenticate.webhook(request);
-  if (!admin) {
-    throw new Response();
+const action = async ({ request }) => {
+  try {
+    const { topic, shop, session, admin, payload } = await authenticate.webhook(request);
+    if (!admin) {
+      console.warn(`[AltOptimizer] Webhook received but no admin: ${topic}`);
+      return new Response();
+    }
+    console.log(`[AltOptimizer] Processing webhook: ${topic} for shop: ${shop}`);
+    switch (topic) {
+      case "APP_UNINSTALLED":
+        await handleAppUninstalled(shop);
+        break;
+      case "SHOP_REDACT":
+        await handleShopRedact(shop);
+        break;
+      case "CUSTOMERS_DATA_REQUEST":
+        await handleCustomersDataRequest(shop, payload);
+        break;
+      case "PRODUCTS_UPDATE":
+      case "PRODUCTS_CREATE":
+        console.log(`[AltOptimizer] Product ${topic} received for shop: ${shop}`);
+        break;
+      default:
+        console.log(`[AltOptimizer] Unhandled webhook topic: ${topic}`);
+    }
+    return new Response();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Webhook processing failed";
+    console.error(`[AltOptimizer] Webhook error: ${message}`);
+    return new Response();
   }
-  switch (topic) {
-    case "APP_UNINSTALLED":
-      await handleAppUninstalled(shop);
-      break;
-    case "SHOP_REDACT":
-      await handleShopRedact(shop);
-      break;
-    case "CUSTOMERS_DATA_REQUEST":
-      await handleCustomersDataRequest(shop);
-      break;
-    case "PRODUCTS_UPDATE":
-    case "PRODUCTS_CREATE":
-      break;
-    default:
-      console.log(`[AltOptimizer] Unhandled webhook topic: ${topic}`);
-  }
-  return new Response();
 };
 async function handleAppUninstalled(shop) {
-  console.log(`[AltOptimizer] App uninstalled for shop: ${shop}`);
   const shopRecord = await prisma.shop.findUnique({
     where: { shopDomain: shop }
   });
   if (shopRecord) {
     await prisma.shop.update({
       where: { id: shopRecord.id },
-      data: { status: "uninstalled" }
+      data: {
+        status: "uninstalled",
+        accessToken: ""
+        // Clear access token immediately — it's invalid after uninstall
+        // Store uninstalled timestamp for 30-day grace period tracking
+      }
+    });
+    console.log(`[AltOptimizer] Shop ${shop} marked as uninstalled. Data retained for 30-day grace period.`);
+    await prisma.session.deleteMany({
+      where: { shop }
     });
   }
 }
 async function handleShopRedact(shop) {
-  console.log(`[AltOptimizer] Shop data redact request for: ${shop}`);
+  console.log(`[AltOptimizer] GDPR redact request for shop: ${shop}`);
   const shopRecord = await prisma.shop.findUnique({
     where: { shopDomain: shop }
   });
   if (shopRecord) {
-    await prisma.product.deleteMany({ where: { shopId: shopRecord.id } });
-    await prisma.backupSnapshot.deleteMany({ where: { shopId: shopRecord.id } });
-    await prisma.usageMetric.deleteMany({ where: { shopId: shopRecord.id } });
-    await prisma.shop.delete({ where: { id: shopRecord.id } });
+    const productImages = await prisma.productImage.findMany({
+      where: { product: { shopId: shopRecord.id } },
+      select: { id: true }
+    });
+    const imageIds = productImages.map((img) => img.id);
+    if (imageIds.length > 0) {
+      await prisma.altTextHistory.deleteMany({
+        where: { imageId: { in: imageIds } }
+      });
+    }
+    await prisma.productImage.deleteMany({
+      where: { product: { shopId: shopRecord.id } }
+    });
+    await prisma.product.deleteMany({
+      where: { shopId: shopRecord.id }
+    });
+    await prisma.backupSnapshot.deleteMany({
+      where: { shopId: shopRecord.id }
+    });
+    await prisma.usageMetric.deleteMany({
+      where: { shopId: shopRecord.id }
+    });
+    await prisma.session.deleteMany({
+      where: { shop }
+    });
+    await prisma.shop.delete({
+      where: { id: shopRecord.id }
+    });
+    console.log(`[AltOptimizer] All data permanently deleted for shop: ${shop}`);
   }
 }
 async function handleCustomersDataRequest(shop, payload) {
   console.log(`[AltOptimizer] Customer data request for shop: ${shop}`);
+  console.log(`[AltOptimizer] Request payload:`, JSON.stringify(payload));
 }
 const route7 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
@@ -2716,21 +3052,75 @@ const route8 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   loader: loader$1
 }, Symbol.toStringTag, { value: "Module" }));
 function Boundary({ error: errorProp }) {
-  var _a;
   const routeError = useRouteError();
   const error = errorProp || routeError;
   let title = "Something went wrong";
-  let message = "An unexpected error occurred. Please try again.";
+  let description = "An unexpected error occurred. Please try again.";
+  let showRetry = true;
   if (isRouteErrorResponse(error)) {
-    title = `${error.status} ${error.statusText}`;
-    message = ((_a = error.data) == null ? void 0 : _a.message) || message;
+    title = `Error ${error.status}`;
+    switch (error.status) {
+      case 404:
+        description = "The page you're looking for doesn't exist or has been removed.";
+        break;
+      case 403:
+        description = "You don't have permission to access this page. Please contact your Shopify admin.";
+        showRetry = false;
+        break;
+      case 401:
+        description = "Your session has expired. Please refresh the page to re-authenticate.";
+        break;
+      case 429:
+        description = "Too many requests. Please wait a moment and try again.";
+        break;
+      case 500:
+        description = "The server encountered an internal error. Our team has been notified.";
+        break;
+      default:
+        description = error.statusText || description;
+    }
   } else if (error instanceof Error) {
-    message = error.message;
+    const msg = error.message.toLowerCase();
+    if (msg.includes("quota") || msg.includes("rate limit") || msg.includes("429") || msg.includes("too many")) {
+      title = "Rate Limit Reached";
+      description = "The AI service is temporarily rate-limited. Please wait a moment and try again.";
+    } else if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("abort")) {
+      title = "Request Timed Out";
+      description = "The request took too long to complete. The AI service may be experiencing high load. Please try again.";
+    } else if (msg.includes("openai") || msg.includes("api key") || msg.includes("auth")) {
+      title = "AI Service Configuration Error";
+      description = "There's an issue with the AI service configuration. Please check your API key in Settings.";
+      showRetry = false;
+    } else if (msg.includes("invalid image") || msg.includes("image format") || msg.includes("base64")) {
+      title = "Invalid Image";
+      description = "The image could not be processed. It may be corrupted or in an unsupported format.";
+    } else if (msg.includes("network") || msg.includes("fetch") || msg.includes("econnrefused")) {
+      title = "Network Error";
+      description = "Unable to connect to the server. Please check your internet connection and try again.";
+    } else if (msg.includes("not found") || msg.includes("missing")) {
+      title = "Data Not Found";
+      description = "The requested data could not be found. It may have been deleted or not yet synced.";
+    } else {
+      description = error.message;
+    }
   }
-  return /* @__PURE__ */ jsx(Page, { title: "Error", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(BlockStack, { gap: "300", children: [
-    /* @__PURE__ */ jsx(Text, { as: "h2", variant: "headingMd", children: title }),
-    /* @__PURE__ */ jsx(Text, { as: "p", variant: "bodyMd", children: message })
-  ] }) }) });
+  return /* @__PURE__ */ jsx(Page, { children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsx(
+    EmptyState,
+    {
+      heading: title,
+      action: showRetry ? {
+        content: "Try Again",
+        onAction: () => window.location.reload()
+      } : void 0,
+      secondaryAction: {
+        content: "Go to Dashboard",
+        onAction: () => {
+          window.location.href = "/app";
+        }
+      },
+      children: /* @__PURE__ */ jsx(Text, { as: "p", children: description })
+    }
+  ) }) });
 }
 const navItems = [
   { label: "Dashboard", url: "/app", matchPrefix: "/app" },
@@ -2800,7 +3190,7 @@ const route9 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProper
   headers,
   loader
 }, Symbol.toStringTag, { value: "Module" }));
-const serverManifest = { "entry": { "module": "/assets/entry.client-BA3JXWZ0.js", "imports": ["/assets/components-zjYcV_oK.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/root-CHlt5EaS.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/context-DXW_CJV0.js", "/assets/context-BS_Je5Ip.js"], "css": [] }, "routes/app.generate": { "id": "routes/app.generate", "parentId": "routes/app", "path": "generate", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.generate-Ct-1hIPW.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/use-index-resource-state-C21JKJxH.js", "/assets/Page-D72GGr1Q.js", "/assets/Layout-Bj1CSlqc.js", "/assets/Banner-DXa2cVqu.js", "/assets/FormLayout-COBlDGUS.js", "/assets/Select-D3roPr4l.js", "/assets/Thumbnail-CfqSQdnO.js", "/assets/context-DXW_CJV0.js", "/assets/Image-CkTLJMMF.js", "/assets/Sticky-BR5DPMm0.js", "/assets/CSSTransition-Cosia9D7.js"], "css": [] }, "routes/app.products": { "id": "routes/app.products", "parentId": "routes/app", "path": "products", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.products-BsHYe_RN.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/use-index-resource-state-C21JKJxH.js", "/assets/Page-D72GGr1Q.js", "/assets/Thumbnail-CfqSQdnO.js", "/assets/Layout-Bj1CSlqc.js", "/assets/Select-D3roPr4l.js", "/assets/EmptyState-BxLnGGWW.js", "/assets/context-DXW_CJV0.js", "/assets/Image-CkTLJMMF.js", "/assets/Sticky-BR5DPMm0.js", "/assets/CSSTransition-Cosia9D7.js"], "css": [] }, "routes/app.settings": { "id": "routes/app.settings", "parentId": "routes/app", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.settings-DpDOHW_v.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/Page-D72GGr1Q.js", "/assets/Layout-Bj1CSlqc.js", "/assets/Banner-DXa2cVqu.js", "/assets/DataTable-C6mo0F9e.js", "/assets/FormLayout-COBlDGUS.js", "/assets/Select-D3roPr4l.js", "/assets/ProgressBar-BpgfY8eo.js", "/assets/context-DXW_CJV0.js", "/assets/Sticky-BR5DPMm0.js", "/assets/CSSTransition-Cosia9D7.js"], "css": [] }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app._index-CBd2VGg-.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/Page-D72GGr1Q.js", "/assets/Layout-Bj1CSlqc.js", "/assets/Banner-DXa2cVqu.js", "/assets/ProgressBar-BpgfY8eo.js", "/assets/context-DXW_CJV0.js", "/assets/CSSTransition-Cosia9D7.js"], "css": [] }, "routes/app.backup": { "id": "routes/app.backup", "parentId": "routes/app", "path": "backup", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.backup-6rsCorPU.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/Page-D72GGr1Q.js", "/assets/Layout-Bj1CSlqc.js", "/assets/Banner-DXa2cVqu.js", "/assets/EmptyState-BxLnGGWW.js", "/assets/DataTable-C6mo0F9e.js", "/assets/context-DXW_CJV0.js", "/assets/Image-CkTLJMMF.js", "/assets/Sticky-BR5DPMm0.js"], "css": [] }, "routes/app.review": { "id": "routes/app.review", "parentId": "routes/app", "path": "review", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.review-Cud3XroD.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/Page-D72GGr1Q.js", "/assets/Layout-Bj1CSlqc.js", "/assets/Banner-DXa2cVqu.js", "/assets/Select-D3roPr4l.js", "/assets/EmptyState-BxLnGGWW.js", "/assets/Thumbnail-CfqSQdnO.js", "/assets/context-DXW_CJV0.js", "/assets/context-BS_Je5Ip.js", "/assets/CSSTransition-Cosia9D7.js", "/assets/Image-CkTLJMMF.js", "/assets/Sticky-BR5DPMm0.js"], "css": [] }, "routes/webhooks": { "id": "routes/webhooks", "parentId": "root", "path": "webhooks", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/webhooks-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/app-DlIcuejB.js", "imports": ["/assets/components-zjYcV_oK.js", "/assets/Page-D72GGr1Q.js", "/assets/context-DXW_CJV0.js"], "css": [] } }, "url": "/assets/manifest-7ff454be.js", "version": "7ff454be" };
+const serverManifest = { "entry": { "module": "/assets/entry.client-B51Dai5R.js", "imports": ["/assets/components-rJeHIEYM.js"], "css": [] }, "routes": { "root": { "id": "root", "parentId": void 0, "path": "", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/root-BxhnVsOt.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/context-D-fBfBGM.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Image-Co8BjUBj.js"], "css": [] }, "routes/app.generate": { "id": "routes/app.generate", "parentId": "routes/app", "path": "generate", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.generate-ZlnxjRWb.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/FormLayout-CoiT_uXa.js", "/assets/Select-74J1FeeL.js", "/assets/Thumbnail-CPqV4kh1.js", "/assets/List-BnN9C8dJ.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.products": { "id": "routes/app.products", "parentId": "routes/app", "path": "products", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.products-Bv52mZk-.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/use-index-resource-state-C785axlF.js", "/assets/Page-DFtH3I5U.js", "/assets/Thumbnail-CPqV4kh1.js", "/assets/Layout-BsDb6giG.js", "/assets/Select-74J1FeeL.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.settings": { "id": "routes/app.settings", "parentId": "routes/app", "path": "settings", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.settings-XQi46IuU.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/DataTable-BPHGHbA1.js", "/assets/FormLayout-CoiT_uXa.js", "/assets/Select-74J1FeeL.js", "/assets/ProgressBar-I8hKvVMl.js", "/assets/Sticky-8Z49oOeg.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app._index": { "id": "routes/app._index", "parentId": "routes/app", "path": void 0, "index": true, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app._index-BOPIa6lQ.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/List-BnN9C8dJ.js", "/assets/ProgressBar-I8hKvVMl.js", "/assets/CSSTransition-UjcMz1VZ.js"], "css": [] }, "routes/app.backup": { "id": "routes/app.backup", "parentId": "routes/app", "path": "backup", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.backup-CkjTN5N3.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/EmptyState-CqyJuFci.js", "/assets/DataTable-BPHGHbA1.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js"], "css": [] }, "routes/app.review": { "id": "routes/app.review", "parentId": "routes/app", "path": "review", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/app.review-B-RISgd3.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/Layout-BsDb6giG.js", "/assets/Banner-DXRwxdol.js", "/assets/ProgressBar-I8hKvVMl.js", "/assets/context-D-fBfBGM.js", "/assets/CSSTransition-UjcMz1VZ.js", "/assets/FormLayout-CoiT_uXa.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Thumbnail-CPqV4kh1.js", "/assets/Image-Co8BjUBj.js", "/assets/Sticky-8Z49oOeg.js"], "css": [] }, "routes/webhooks": { "id": "routes/webhooks", "parentId": "root", "path": "webhooks", "index": void 0, "caseSensitive": void 0, "hasAction": true, "hasLoader": false, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/webhooks-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/auth.$": { "id": "routes/auth.$", "parentId": "root", "path": "auth/*", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": false, "module": "/assets/auth._-l0sNRNKZ.js", "imports": [], "css": [] }, "routes/app": { "id": "routes/app", "parentId": "root", "path": "app", "index": void 0, "caseSensitive": void 0, "hasAction": false, "hasLoader": true, "hasClientAction": false, "hasClientLoader": false, "hasErrorBoundary": true, "module": "/assets/app-Yrs1ZpQp.js", "imports": ["/assets/components-rJeHIEYM.js", "/assets/Page-DFtH3I5U.js", "/assets/EmptyState-CqyJuFci.js", "/assets/Image-Co8BjUBj.js"], "css": [] } }, "url": "/assets/manifest-e557db2e.js", "version": "e557db2e" };
 const mode = "production";
 const assetsBuildDirectory = "build/client";
 const basename = "/";

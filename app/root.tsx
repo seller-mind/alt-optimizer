@@ -1,5 +1,6 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
+import { Page, Card, Text, EmptyState, Button } from "@shopify/polaris";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import en from "@shopify/polaris/locales/en.json";
 
@@ -20,6 +21,52 @@ export default function App() {
           <Outlet />
         </AppProvider>
         <ScrollRestoration />
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  let title = "Something went wrong";
+  let description = "An unexpected error occurred. Please try again.";
+
+  if (isRouteErrorResponse(error)) {
+    title = `Error ${error.status}`;
+    description =
+      error.status === 404
+        ? "The page you're looking for doesn't exist."
+        : error.status === 403
+          ? "You don't have permission to access this page."
+          : error.statusText || description;
+  } else if (error instanceof Error) {
+    description = error.message || description;
+  }
+
+  return (
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>AltOptimizer - Error</title>
+        <Meta />
+        <Links />
+        <link rel="stylesheet" href={polarisStyles} />
+      </head>
+      <body>
+        <AppProvider i18n={en} isEmbeddedApp>
+          <Page>
+            <Card>
+              <EmptyState
+                heading={title}
+                action={{ content: "Try Again", onAction: () => window.location.reload() }}
+              >
+                <Text as="p">{description}</Text>
+              </EmptyState>
+            </Card>
+          </Page>
+        </AppProvider>
         <Scripts />
       </body>
     </html>

@@ -6,18 +6,22 @@ import {
   Card,
   Text,
   Button,
+  ButtonGroup,
   BlockStack,
   InlineStack,
   Badge,
   Thumbnail,
   IndexTable,
   TextField,
-  Select,
   Banner,
   EmptyState,
-  Modal,
+  ProgressBar,
+  Tabs,
+  Tooltip,
+  Box,
+  InlineError,
 } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { updateImageAltText } from "~/services/shopify.server";
@@ -59,13 +63,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     take: 100,
   });
 
+  const allWithAi = await prisma.productImage.count({
+    where: { altTextAi: { not: null } },
+  });
+
   const counts = await prisma.productImage.groupBy({
     by: ["status"],
     where: { altTextAi: { not: null } },
     _count: true,
   });
 
-  const statusCounts = {
+  const statusCounts: Record<string, number> = {
     pending: 0,
     approved: 0,
     rejected: 0,
@@ -73,9 +81,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   for (const group of counts) {
     if (group.status in statusCounts) {
-      statusCounts[group.status as keyof typeof statusCounts] = group._count;
+      statusCounts[group.status] = group._count;
     }
   }
+
+  const reviewed = (statusCounts.approved || 0) + (statusCounts.rejected || 0);
 
   return {
     images: images.map((img) => ({
@@ -90,6 +100,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
     filter,
     statusCounts,
+    totalWithAi: allWithAi,
+    reviewed,
   };
 };
 
@@ -106,147 +118,224 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
 
-  if (intent === "approve") {
-    const imageIds = formData.getAll("imageIds") as string[];
-    let approved = 0;
+  try {
+    if (intent === "approve") {
+      const imageIds = formData.getAll("imageIds") as string[];
+      let approved = 0;
+      let errors = 0;
 
-    for (const imageIdStr of imageIds) {
-      const imageId = parseInt(imageIdStr, 10);
+      for (const imageIdStr of imageIds) {
+        const imageId = parseInt(imageIdStr, 10);
+        const image = await prisma.productImage.findUnique({
+          where: { id: imageId },
+        });
+
+        if (!image || !image.altTextAi) continue;
+
+        const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
+
+        if (success) {
+          await prisma.productImage.update({
+            where: { id: imageId },
+            data: {
+              altTextOriginal: image.altTextAi,
+              status: "applied",
+            },
+          });
+
+          await prisma.altTextHistory.create({
+            data: {
+              imageId,
+              altText: image.altTextAi,
+              source: "ai",
+            },
+          });
+
+          approved++;
+        } else {
+          errors++;
+        }
+      }
+
+      return json({ success: true, approved, errors, intent: "approve" });
+    }
+
+    if (intent === "reject") {
+      const imageIds = formData.getAll("imageIds") as string[];
+
+      for (const imageIdStr of imageIds) {
+        const imageId = parseInt(imageIdStr, 10);
+        await prisma.productImage.update({
+          where: { id: imageId },
+          data: { status: "rejected" },
+        });
+      }
+
+      return json({ success: true, rejected: imageIds.length, intent: "reject" });
+    }
+
+    if (intent === "edit") {
+      const imageId = parseInt(formData.get("imageId") as string, 10);
+      const newAltText = formData.get("altText") as string;
+
+      if (!newAltText || newAltText.trim().length === 0) {
+        return json({ success: false, error: "Alt text cannot be empty", intent: "edit" });
+      }
+
+      if (newAltText.length > 125) {
+        return json({ success: false, error: "Alt text must be 125 characters or less", intent: "edit" });
+      }
+
       const image = await prisma.productImage.findUnique({
         where: { id: imageId },
       });
 
-      if (!image || !image.altTextAi) continue;
-
-      const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
-
-      if (success) {
-        await prisma.productImage.update({
-          where: { id: imageId },
-          data: {
-            altTextOriginal: image.altTextAi,
-            status: "applied",
-          },
-        });
-
-        await prisma.altTextHistory.create({
-          data: {
-            imageId,
-            altText: image.altTextAi,
-            source: "ai",
-          },
-        });
-
-        approved++;
+      if (!image) {
+        return json({ success: false, error: "Image not found", intent: "edit" });
       }
-    }
 
-    return json({ success: true, approved });
-  }
-
-  if (intent === "reject") {
-    const imageIds = formData.getAll("imageIds") as string[];
-
-    for (const imageIdStr of imageIds) {
-      const imageId = parseInt(imageIdStr, 10);
       await prisma.productImage.update({
         where: { id: imageId },
-        data: { status: "rejected" },
+        data: { altTextAi: newAltText.trim() },
       });
-    }
 
-    return json({ success: true, rejected: imageIds.length });
-  }
-
-  if (intent === "edit") {
-    const imageId = parseInt(formData.get("imageId") as string, 10);
-    const newAltText = formData.get("altText") as string;
-
-    const image = await prisma.productImage.findUnique({
-      where: { id: imageId },
-    });
-
-    if (!image) {
-      return json({ success: false, error: "Image not found" });
-    }
-
-    await prisma.productImage.update({
-      where: { id: imageId },
-      data: { altTextAi: newAltText },
-    });
-
-    const autoApply = formData.get("autoApply") === "true";
-    if (autoApply) {
-      const success = await updateImageAltText(admin, image.shopifyImageId, newAltText);
-      if (success) {
-        await prisma.productImage.update({
-          where: { id: imageId },
-          data: {
-            altTextOriginal: newAltText,
-            status: "applied",
-          },
-        });
+      const autoApply = formData.get("autoApply") === "true";
+      if (autoApply) {
+        const success = await updateImageAltText(admin, image.shopifyImageId, newAltText.trim());
+        if (success) {
+          await prisma.productImage.update({
+            where: { id: imageId },
+            data: {
+              altTextOriginal: newAltText.trim(),
+              status: "applied",
+            },
+          });
+        }
       }
+
+      return json({ success: true, intent: "edit" });
     }
 
-    return json({ success: true });
-  }
+    if (intent === "bulk_approve") {
+      const pendingImages = await prisma.productImage.findMany({
+        where: {
+          product: { shopId: shop.id },
+          status: "pending",
+          altTextAi: { not: null },
+        },
+      });
 
-  if (intent === "bulk_approve") {
-    const pendingImages = await prisma.productImage.findMany({
-      where: {
-        product: { shopId: shop.id },
-        status: "pending",
-        altTextAi: { not: null },
-      },
-    });
+      let approved = 0;
+      let errors = 0;
+      for (const image of pendingImages) {
+        if (!image.altTextAi) continue;
 
-    let approved = 0;
-    for (const image of pendingImages) {
-      if (!image.altTextAi) continue;
+        const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
+        if (success) {
+          await prisma.productImage.update({
+            where: { id: image.id },
+            data: {
+              altTextOriginal: image.altTextAi,
+              status: "applied",
+            },
+          });
+          approved++;
+        } else {
+          errors++;
+        }
+      }
 
-      const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
-      if (success) {
+      return json({ success: true, approved, errors, intent: "bulk_approve" });
+    }
+
+    if (intent === "bulk_reject") {
+      const pendingImages = await prisma.productImage.findMany({
+        where: {
+          product: { shopId: shop.id },
+          status: "pending",
+          altTextAi: { not: null },
+        },
+      });
+
+      for (const image of pendingImages) {
         await prisma.productImage.update({
           where: { id: image.id },
-          data: {
-            altTextOriginal: image.altTextAi,
-            status: "applied",
-          },
+          data: { status: "rejected" },
         });
-        approved++;
       }
+
+      return json({ success: true, rejected: pendingImages.length, intent: "bulk_reject" });
     }
 
-    return json({ success: true, approved });
+    return json({ success: false, error: "Unknown action", intent: "unknown" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "An unexpected error occurred";
+    return json({ success: false, error: message, intent });
   }
-
-  return json({ success: false, error: "Unknown action" });
 };
 
+function StatusBadge({ status }: { status: string }) {
+  const config: Record<string, { tone: "success" | "critical" | "info" | "warning"; label: string }> = {
+    applied: { tone: "success", label: "Applied" },
+    pending: { tone: "info", label: "Pending" },
+    rejected: { tone: "critical", label: "Rejected" },
+    generated: { tone: "warning", label: "Generated" },
+  };
+  const c = config[status] || { tone: "info" as const, label: status };
+  return <Badge tone={c.tone}>{c.label}</Badge>;
+}
+
 export default function ReviewPage() {
-  const { images, filter, statusCounts } = useLoaderData<typeof loader>();
+  const { images, filter, statusCounts, totalWithAi, reviewed } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isProcessing = navigation.state !== "idle";
 
   const [selectedFilter, setSelectedFilter] = useState<string>(filter);
-  const [editingImage, setEditingImage] = useState<{
-    id: number;
-    altText: string;
-  } | null>(null);
-  const [editValue, setEditValue] = useState("");
   const [selectedResources, setSelectedResources] = useState<string[]>([]);
+  const [editingRow, setEditingRow] = useState<{ id: number; altText: string } | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [toast, setToast] = useState<{ message: string; tone: "success" | "critical" | "warning" } | null>(null);
+
+  // Show toast from action data
+  useMemo(() => {
+    if (actionData?.success) {
+      const ad = actionData as any;
+      if (ad.intent === "approve" || ad.intent === "bulk_approve") {
+        const msg = ad.errors > 0
+          ? `Approved ${ad.approved} images (${ad.errors} failed to sync to Shopify)`
+          : `Successfully approved ${ad.approved} images`;
+        setToast({ message: msg, tone: ad.errors > 0 ? "warning" : "success" });
+      } else if (ad.intent === "reject" || ad.intent === "bulk_reject") {
+        setToast({ message: `Rejected ${ad.rejected} images`, tone: "success" });
+      } else if (ad.intent === "edit") {
+        setToast({ message: "Alt text updated successfully", tone: "success" });
+      }
+    } else if (actionData && !actionData.success) {
+      setToast({ message: (actionData as any).error || "Operation failed", tone: "critical" });
+    }
+  }, [actionData]);
+
+  const tabs = useMemo(() => [
+    { id: "pending", content: `Pending (${statusCounts.pending || 0})` },
+    { id: "approved", content: `Applied (${statusCounts.approved || 0})` },
+    { id: "rejected", content: `Rejected (${statusCounts.rejected || 0})` },
+    { id: "all", content: "All" },
+  ], [statusCounts]);
+
+  const selectedTabIndex = tabs.findIndex((t) => t.id === selectedFilter);
 
   const handleFilterChange = useCallback(
-    (value: string) => {
-      setSelectedFilter(value);
+    (selectedTabIndex: number) => {
+      const newFilter = tabs[selectedTabIndex].id;
+      setSelectedFilter(newFilter);
+      setSelectedResources([]);
       const params = new URLSearchParams();
-      if (value !== "pending") params.set("filter", value);
+      if (newFilter !== "pending") params.set("filter", newFilter);
       submit(params, { method: "get" });
     },
-    [submit]
+    [submit, tabs]
   );
 
   const handleApprove = useCallback(
@@ -275,21 +364,35 @@ export default function ReviewPage() {
     submit(formData, { method: "post" });
   }, [submit]);
 
-  const handleEdit = useCallback((id: number, altText: string) => {
-    setEditingImage({ id, altText });
+  const handleBulkReject = useCallback(() => {
+    const formData = new FormData();
+    formData.set("intent", "bulk_reject");
+    submit(formData, { method: "post" });
+  }, [submit]);
+
+  const handleStartEdit = useCallback((id: number, altText: string) => {
+    setEditingRow({ id, altText });
     setEditValue(altText);
   }, []);
 
   const handleSaveEdit = useCallback(() => {
-    if (!editingImage) return;
+    if (!editingRow) return;
+    if (!editValue.trim()) return;
+    if (editValue.length > 125) return;
+
     const formData = new FormData();
     formData.set("intent", "edit");
-    formData.set("imageId", String(editingImage.id));
-    formData.set("altText", editValue);
+    formData.set("imageId", String(editingRow.id));
+    formData.set("altText", editValue.trim());
     formData.set("autoApply", "true");
     submit(formData, { method: "post" });
-    setEditingImage(null);
-  }, [editingImage, editValue, submit]);
+    setEditingRow(null);
+  }, [editingRow, editValue, submit]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingRow(null);
+    setEditValue("");
+  }, []);
 
   const toggleSelection = useCallback((id: string) => {
     setSelectedResources((prev) =>
@@ -305,105 +408,136 @@ export default function ReviewPage() {
     }
   }, [images, selectedResources.length]);
 
+  const progressPercent = totalWithAi > 0 ? Math.round((reviewed / totalWithAi) * 100) : 0;
+  const pendingCount = statusCounts.pending || 0;
+  const isEditingRow = editingRow !== null;
+
   return (
     <Page
       title="Review & Approve"
       subtitle="Review AI-generated alt text before applying to your store"
-      primaryAction={
-        statusCounts.pending > 0 ? (
-          <Button variant="primary" onClick={handleBulkApprove} disabled={isProcessing}>
-            Approve All Pending ({statusCounts.pending})
-          </Button>
-        ) : undefined
-      }
     >
       <Layout>
-        {actionData?.success && (
+        {toast && (
           <Layout.Section>
-            <Banner title="Success" tone="success">
-              <Text as="p">
-                {"approved" in actionData
-                  ? `Approved ${actionData.approved} images.`
-                  : "Operation completed successfully."}
-              </Text>
-            </Banner>
+            <Banner
+              title={toast.message}
+              tone={toast.tone}
+              onDismiss={() => setToast(null)}
+            />
           </Layout.Section>
         )}
 
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
+              {/* Progress Bar */}
               <InlineStack align="space-between" blockAlign="center">
-                <InlineStack gap="300">
-                  <Text as="h2" variant="headingMd">
-                    Alt Text Review
-                  </Text>
-                  <InlineStack gap="100">
-                    <Badge tone="info">Pending: {statusCounts.pending}</Badge>
-                    <Badge tone="success">Applied: {statusCounts.approved}</Badge>
-                    <Badge tone="critical">Rejected: {statusCounts.rejected}</Badge>
-                  </InlineStack>
+                <Text as="h2" variant="headingMd">
+                  Review Progress
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {reviewed} of {totalWithAi} reviewed
+                </Text>
+              </InlineStack>
+              <ProgressBar progress={progressPercent} tone={progressPercent === 100 ? "success" : "info"} />
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              {/* Tabs */}
+              <Tabs tabs={tabs} selected={selectedTabIndex} onSelect={handleFilterChange} />
+
+              {/* Bulk Actions */}
+              <InlineStack align="space-between" blockAlign="center">
+                <InlineStack gap="200">
+                  {selectedResources.length > 0 && (
+                    <>
+                      <Text as="p" variant="bodySm" fontWeight="semibold">
+                        {selectedResources.length} selected
+                      </Text>
+                      <ButtonGroup>
+                        <Button
+                          onClick={() => handleApprove(selectedResources)}
+                          disabled={isProcessing}
+                          variant="primary"
+                          size="slim"
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          onClick={() => handleReject(selectedResources)}
+                          disabled={isProcessing}
+                          tone="critical"
+                          size="slim"
+                        >
+                          Reject
+                        </Button>
+                      </ButtonGroup>
+                    </>
+                  )}
+                  {pendingCount > 0 && selectedResources.length === 0 && (
+                    <ButtonGroup>
+                      <Tooltip content="Approve all pending images and apply to Shopify store">
+                        <Button
+                          onClick={handleBulkApprove}
+                          disabled={isProcessing}
+                          variant="primary"
+                          size="slim"
+                        >
+                          Approve All ({pendingCount})
+                        </Button>
+                      </Tooltip>
+                      <Tooltip content="Reject all pending images">
+                        <Button
+                          onClick={handleBulkReject}
+                          disabled={isProcessing}
+                          tone="critical"
+                          size="slim"
+                        >
+                          Reject All
+                        </Button>
+                      </Tooltip>
+                    </ButtonGroup>
+                  )}
                 </InlineStack>
-                <Select
-                  label=""
-                  labelInline
-                  options={[
-                    { label: "Pending Review", value: "pending" },
-                    { label: "All", value: "all" },
-                    { label: "Applied", value: "approved" },
-                    { label: "Rejected", value: "rejected" },
-                  ]}
-                  value={selectedFilter}
-                  onChange={handleFilterChange}
-                />
               </InlineStack>
 
+              {/* Empty State */}
               {images.length === 0 ? (
                 <EmptyState heading="No images to review">
                   <Text as="p">
                     {filter === "pending"
-                      ? "All images have been reviewed. Generate more alt text to review."
+                      ? "All images have been reviewed! Generate more alt text or change the filter."
                       : "No images match the selected filter."}
                   </Text>
                 </EmptyState>
               ) : (
-                <>
-                  <InlineStack gap="200">
-                    <Button
-                      onClick={() => handleApprove(selectedResources)}
-                      disabled={selectedResources.length === 0 || isProcessing}
-                      variant="primary"
-                    >
-                      Approve Selected ({selectedResources.length})
-                    </Button>
-                    <Button
-                      onClick={() => handleReject(selectedResources)}
-                      disabled={selectedResources.length === 0 || isProcessing}
-                      tone="critical"
-                    >
-                      Reject Selected
-                    </Button>
-                  </InlineStack>
-
-                  <IndexTable
-                    resourceName={{ singular: "image", plural: "images" }}
-                    itemCount={images.length}
-                    selectedItemsCount={selectedResources.length}
-                    onSelectionChange={(selectionType, toggleIds) => {
-                      if (selectionType === "page") {
-                        toggleAll();
-                      }
-                    }}
-                    headings={[
-                      { title: "Image" },
-                      { title: "Product" },
-                      { title: "Current Alt Text" },
-                      { title: "AI Suggested" },
-                      { title: "Status" },
-                      { title: "Actions" },
-                    ]}
-                  >
-                    {images.map((image, index) => (
+                <IndexTable
+                  resourceName={{ singular: "image", plural: "images" }}
+                  itemCount={images.length}
+                  selectedItemsCount={selectedResources.length}
+                  onSelectionChange={(selectionType) => {
+                    if (selectionType === "all") {
+                      toggleAll();
+                    }
+                  }}
+                  headings={[
+                    { title: "Image" },
+                    { title: "Product" },
+                    { title: "Current Alt Text" },
+                    { title: "AI Suggested" },
+                    { title: "Status" },
+                    { title: "Actions" },
+                  ]}
+                  hasZebraStriping
+                >
+                  {images.map((image, index) => {
+                    const isEditingThis = editingRow?.id === image.id;
+                    return (
                       <IndexTable.Row
                         id={String(image.id)}
                         key={image.id}
@@ -418,49 +552,84 @@ export default function ReviewPage() {
                           />
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Text as="p" variant="bodyMd" fontWeight="semibold">
+                          <Text as="p" variant="bodyMd" fontWeight="semibold" truncate>
                             {image.productTitle}
                           </Text>
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Text as="p" variant="bodySm">
-                            {image.altTextOriginal || (
-                              <Text as="span" tone="subdued">No alt text</Text>
-                            )}
-                          </Text>
+                          {image.altTextOriginal ? (
+                            <Text as="p" variant="bodySm">
+                              {image.altTextOriginal.length > 80
+                                ? image.altTextOriginal.slice(0, 80) + "..."
+                                : image.altTextOriginal}
+                            </Text>
+                          ) : (
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              No alt text
+                            </Text>
+                          )}
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Text as="p" variant="bodySm" color="success">
-                            {image.altTextAi}
-                          </Text>
+                          {isEditingThis ? (
+                            <BlockStack gap="100">
+                              <TextField
+                                label=""
+                                labelHidden
+                                value={editValue}
+                                onChange={setEditValue}
+                                maxLength={125}
+                                showCharacterCount
+                                autoComplete="off"
+                                autoFocus
+                              />
+                              <InlineStack gap="100">
+                                <Button size="slim" variant="primary" onClick={handleSaveEdit} disabled={!editValue.trim()}>
+                                  Save
+                                </Button>
+                                <Button size="slim" onClick={handleCancelEdit}>
+                                  Cancel
+                                </Button>
+                              </InlineStack>
+                            </BlockStack>
+                          ) : (
+                            <Box
+                              padding="100"
+                              background="bg-surface-secondary"
+                              borderRadius="200"
+                              minHeight="32px"
+                              onClick={() => handleStartEdit(image.id, image.altTextAi || "")}
+                              style={{ cursor: "pointer" }}
+                            >
+                              <Text as="p" variant="bodySm">
+                                {image.altTextAi ? (
+                                  image.altTextAi.length > 80
+                                    ? image.altTextAi.slice(0, 80) + "..."
+                                    : image.altTextAi
+                                ) : (
+                                  <Text as="span" tone="subdued">Not generated</Text>
+                                )}
+                              </Text>
+                            </Box>
+                          )}
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Badge
-                            tone={
-                              image.status === "applied"
-                                ? "success"
-                                : image.status === "rejected"
-                                  ? "critical"
-                                  : "info"
-                            }
-                          >
-                            {image.status}
-                          </Badge>
+                          <StatusBadge status={image.status} />
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <InlineStack gap="100">
+                          <ButtonGroup>
                             <Button
                               size="slim"
                               variant="plain"
                               onClick={() => handleApprove([String(image.id)])}
-                              disabled={image.status === "applied"}
+                              disabled={image.status === "applied" || isProcessing || isEditingRow}
                             >
                               Approve
                             </Button>
                             <Button
                               size="slim"
                               variant="plain"
-                              onClick={() => handleEdit(image.id, image.altTextAi || "")}
+                              onClick={() => handleStartEdit(image.id, image.altTextAi || "")}
+                              disabled={isEditingRow}
                             >
                               Edit
                             </Button>
@@ -469,54 +638,21 @@ export default function ReviewPage() {
                               variant="plain"
                               tone="critical"
                               onClick={() => handleReject([String(image.id)])}
-                              disabled={image.status === "rejected"}
+                              disabled={image.status === "rejected" || isProcessing || isEditingRow}
                             >
                               Reject
                             </Button>
-                          </InlineStack>
+                          </ButtonGroup>
                         </IndexTable.Cell>
                       </IndexTable.Row>
-                    ))}
-                  </IndexTable>
-                </>
+                    );
+                  })}
+                </IndexTable>
               )}
             </BlockStack>
           </Card>
         </Layout.Section>
       </Layout>
-
-      {editingImage && (
-        <Modal
-          open={true}
-          onClose={() => setEditingImage(null)}
-          title="Edit Alt Text"
-          primaryAction={{
-            content: "Save & Apply",
-            onAction: handleSaveEdit,
-          }}
-          secondaryActions={[
-            {
-              content: "Cancel",
-              onAction: () => setEditingImage(null),
-            },
-          ]}
-        >
-          <Modal.Section>
-            <TextField
-              label="Alt Text"
-              value={editValue}
-              onChange={setEditValue}
-              maxLength={125}
-              showCharacterCount
-              multiline={3}
-              autoComplete="off"
-            />
-            <Text as="p" variant="bodySm" tone="subdued">
-              Maximum 125 characters for optimal accessibility.
-            </Text>
-          </Modal.Section>
-        </Modal>
-      )}
     </Page>
   );
 }

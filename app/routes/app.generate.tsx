@@ -6,6 +6,7 @@ import {
   Card,
   Text,
   Button,
+  ButtonGroup,
   BlockStack,
   InlineStack,
   Select,
@@ -17,8 +18,10 @@ import {
   useIndexResourceState,
   FormLayout,
   ChoiceList,
+  Tooltip,
+  List,
 } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
@@ -327,12 +330,23 @@ export default function GeneratePage() {
 
         {actionData && actionData.success && (
           <Layout.Section>
-            <Banner title="Generation complete" tone="success">
-              <Text as="p">
-                {"generated" in actionData
-                  ? `Successfully generated ${actionData.generated} of ${actionData.total} alt texts.`
-                  : "Operation completed successfully."}
-              </Text>
+            <Banner title="Generation complete" tone="success" onDismiss={() => {}}>
+              <BlockStack gap="200">
+                <Text as="p">
+                  {"generated" in actionData
+                    ? `Successfully generated ${actionData.generated} of ${actionData.total} alt texts.`
+                    : "Operation completed successfully."}
+                </Text>
+                {"results" in actionData && actionData.results && (
+                  <>
+                    {actionData.results.filter((r: any) => !r.success).length > 0 && (
+                      <Text as="p" tone="critical">
+                        {actionData.results.filter((r: any) => !r.success).length} failed. See details below.
+                      </Text>
+                    )}
+                  </>
+                )}
+              </BlockStack>
             </Banner>
           </Layout.Section>
         )}
@@ -384,6 +398,7 @@ export default function GeneratePage() {
                     variant="primary"
                     onClick={handleGenerate}
                     disabled={isGenerating || products.length === 0}
+                    loading={isGenerating}
                   >
                     {isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`}
                   </Button>
@@ -408,43 +423,92 @@ export default function GeneratePage() {
                   All products have alt text. No generation needed.
                 </Text>
               ) : (
-                <IndexTable
-                  resourceName={{ singular: "product", plural: "products" }}
-                  itemCount={products.length}
-                  selectedItemsCount={selectedResources.selectedItemsCount}
-                  headings={[
-                    { title: "Image" },
-                    { title: "Product" },
-                    { title: "Images Needing Alt" },
-                  ]}
-                  {...selectedResources}
-                >
-                  {products.map((product, index) => (
-                    <IndexTable.Row
-                      id={String(product.id)}
-                      key={product.id}
-                      selected={selectedResources.selectedResources.includes(String(product.id))}
-                      position={index}
-                    >
-                      <IndexTable.Cell>
-                        <Thumbnail
-                          source={product.images[0]?.src || ""}
-                          alt={product.title}
-                          size="small"
-                        />
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        <Text as="p" fontWeight="semibold">{product.title}</Text>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          /{product.handle}
-                        </Text>
-                      </IndexTable.Cell>
-                      <IndexTable.Cell>
-                        <Badge>{product.images.length} images</Badge>
-                      </IndexTable.Cell>
-                    </IndexTable.Row>
-                  ))}
-                </IndexTable>
+                <>
+                  <IndexTable
+                    resourceName={{ singular: "product", plural: "products" }}
+                    itemCount={products.length}
+                    selectedItemsCount={selectedResources.selectedItemsCount}
+                    headings={[
+                      { title: "Image" },
+                      { title: "Product" },
+                      { title: "Images Needing Alt" },
+                    ]}
+                    {...selectedResources}
+                  >
+                    {products.map((product, index) => (
+                      <IndexTable.Row
+                        id={String(product.id)}
+                        key={product.id}
+                        selected={selectedResources.selectedResources.includes(String(product.id))}
+                        position={index}
+                      >
+                        <IndexTable.Cell>
+                          <Thumbnail
+                            source={product.images[0]?.src || ""}
+                            alt={product.title}
+                            size="small"
+                          />
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Text as="p" fontWeight="semibold">{product.title}</Text>
+                          <Text as="p" variant="bodySm" tone="subdued">
+                            /{product.handle}
+                          </Text>
+                        </IndexTable.Cell>
+                        <IndexTable.Cell>
+                          <Badge>{product.images.length} images</Badge>
+                        </IndexTable.Cell>
+                      </IndexTable.Row>
+                    ))}
+                  </IndexTable>
+
+                  {/* Failed Results with Retry */}
+                  {actionData?.success && "results" in actionData && actionData.results && (
+                    <Card>
+                      <BlockStack gap="200">
+                        <Text as="h3" variant="headingSm">Generation Results</Text>
+                        {actionData.results.filter((r: any) => !r.success).length > 0 && (
+                          <>
+                            <Banner tone="critical" title="Some items failed">
+                              <Text as="p">
+                                The following items encountered errors. You can retry them individually.
+                              </Text>
+                            </Banner>
+                            <List type="bullet">
+                              {actionData.results
+                                .filter((r: any) => !r.success)
+                                .map((r: any) => (
+                                  <List.Item key={r.imageId}>
+                                    <InlineStack gap="200" wrap={false} align="space-between">
+                                      <Text as="p" variant="bodySm" tone="critical">
+                                        Image #{r.imageId}: {r.error || "Unknown error"}
+                                      </Text>
+                                      <Button
+                                        size="slim"
+                                        variant="plain"
+                                        onClick={() => {
+                                          const fd = new FormData();
+                                          fd.set("intent", "generate_alt");
+                                          fd.set("autoApply", autoApply);
+                                          fd.append("imageIds", String(r.imageId));
+                                          submit(fd, { method: "post" });
+                                        }}
+                                      >
+                                        Retry
+                                      </Button>
+                                    </InlineStack>
+                                  </List.Item>
+                                ))}
+                            </List>
+                          </>
+                        )}
+                        {actionData.results.filter((r: any) => r.success).length > 0 && (
+                          <Banner tone="success" title={`${actionData.results.filter((r: any) => r.success).length} generated successfully`} />
+                        )}
+                      </BlockStack>
+                    </Card>
+                  )}
+                </>
               )}
             </BlockStack>
           </Card>
