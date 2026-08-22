@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id          String   @id
+  shop        String
+  state       String
+  isOnline    Boolean  @default(false) @map("is_online")
+  scope       String?
+  expires     DateTime?
+  accessToken String   @default("") @map("access_token")
+  userId      BigInt?  @map("user_id")
+
+  @@map("session")
+}
+
+model Shop {
+  id          Int      @id @default(autoincrement())
+  shopDomain  String   @unique @map("shop_domain")
+  accessToken String   @map("access_token")
+  planType    String   @default("free") @map("plan_type")
+  installedAt DateTime @default(now()) @map("installed_at")
+  status      String   @default("active")
+  locale      String   @default("en")
+  chargeId    String?  @map("charge_id")
+
+  products        Product[]
+  backupSnapshots BackupSnapshot[]
+  usageMetrics    UsageMetric[]
+
+  @@map("shops")
+}
+
+model Product {
+  id                  Int    @id @default(autoincrement())
+  shopId              Int    @map("shop_id")
+  shopifyProductId    String @map("shopify_product_id")
+  title               String
+  handle              String
+  description         String @default("")
+  imageCount          Int    @default(0) @map("image_count")
+  hasJsonLd           Boolean @default(false) @map("has_json_ld")
+  jsonLdData          String? @map("json_ld_data")
+
+  shop   Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  images ProductImage[]
+
+  @@unique([shopId, shopifyProductId])
+  @@map("products")
+}
+
+model ProductImage {
+  id               Int    @id @default(autoincrement())
+  productId        Int    @map("product_id")
+  shopifyImageId   String @map("shopify_image_id")
+  src              String
+  altTextOriginal  String? @map("alt_text_original")
+  altTextAi        String? @map("alt_text_ai")
+  status           String @default("pending") // pending, approved, rejected, applied
+  tagsOriginal     String? @map("tags_original")
+  tagsAi           String? @map("tags_ai")
+
+  product Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  history AltTextHistory[]
+
+  @@map("product_images")
+}
+
+model AltTextHistory {
+  id        Int      @id @default(autoincrement())
+  imageId   Int      @map("image_id")
+  altText   String   @map("alt_text")
+  source    String   @default("ai") // manual, ai
+  createdAt DateTime @default(now()) @map("created_at")
+
+  image ProductImage @relation(fields: [imageId], references: [id], onDelete: Cascade)
+
+  @@map("alt_text_history")
+}
+
+model BackupSnapshot {
+  id         Int      @id @default(autoincrement())
+  shopId     Int      @map("shop_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  recordCount Int     @default(0) @map("record_count")
+  data       String   // JSON blob of backup data
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("backup_snapshots")
+}
+
+model UsageMetric {
+  id               Int      @id @default(autoincrement())
+  shopId           Int      @map("shop_id")
+  date             String   // YYYY-MM-DD format
+  imagesGenerated  Int      @default(0) @map("images_generated")
+  apiCalls         Int      @default(0) @map("api_calls")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, date])
+  @@map("usage_metrics")
+}

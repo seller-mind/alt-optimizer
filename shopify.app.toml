@@ -1,0 +1,33 @@
+# Shopify App Configuration
+# https://shopify.dev/docs/apps/build/cli-for-shopify/app-configuration
+
+client_id = ""
+application_url = "https://localhost:5000"
+embedded = true
+name = "AltOptimizer"
+
+[build]
+dev_store_url = ""
+automatically_update_urls_on_dev = true
+
+[auth]
+redirect_urls = [
+  "https://localhost:5000/auth/callback",
+  "https://localhost:5000/auth/shopify/callback"
+]
+
+[webhooks]
+api_version = "2024-10"
+
+  [webhooks.subscriptions]
+  [webhooks.subscriptions.app_uninstalled]
+  uri = "/webhooks/app/uninstalled"
+
+  [webhooks.subscriptions.shop_redact]
+  uri = "/webhooks/shop/redact"
+
+  [webhooks.subscriptions.customers_data_request]
+  uri = "/webhooks/customers/data_request"
+
+[pos]
+embedded = false
