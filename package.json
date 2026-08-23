@@ -11,7 +11,10 @@
     "start": "PORT=${DEPLOY_RUN_PORT:-3000} remix-serve ./build/server/index.js",
     "generate": "prisma generate",
     "push": "prisma db push",
-    "studio": "prisma studio"
+    "studio": "prisma studio",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
