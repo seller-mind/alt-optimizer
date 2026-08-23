@@ -1,0 +1,21 @@
+{
+  "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install",
+  "outputDirectory": "build",
+  "functions": {
+    "api/server.ts": {
+      "maxDuration": 30,
+      "memory": 512
+    }
+  },
+  "routes": [
+    { "src": "/(.*)", "dest": "api/server.ts" }
+  ],
+  "framework": "remix",
+  "devCommand": "pnpm run dev",
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  }
+}
