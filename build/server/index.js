@@ -547,71 +547,119 @@ const prisma = globalThis.__prisma ?? new PrismaClient();
 if (process.env.NODE_ENV !== "production") {
   globalThis.__prisma = prisma;
 }
-const shopify = shopifyApp({
-  apiKey: process.env.SHOPIFY_API_KEY || "",
-  apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
-  scopes: [
-    "read_products",
-    "write_products",
-    "read_themes",
-    "write_themes",
-    "read_content",
-    "write_content"
-  ],
-  apiVersion: ApiVersion.October24,
-  isEmbeddedApp: true,
-  appDistribution: AppDistribution.AppStore,
-  appUrl: process.env.HOST || "https://localhost:5000",
-  sessionStorage: new PrismaSessionStorage(prisma),
-  billing: {
-    Free: {
-      amount: 0,
-      currencyCode: "USD",
-      interval: "EVER_30_DAYS",
-      usageTerms: "50 image generations per month"
+function getShopifyConfig() {
+  const apiKey = process.env.SHOPIFY_API_KEY;
+  const apiSecretKey = process.env.SHOPIFY_API_SECRET;
+  const appUrl = process.env.SHOPIFY_APP_URL || process.env.HOST || "https://localhost:5000";
+  return {
+    apiKey: apiKey || "",
+    apiSecretKey: apiSecretKey || "",
+    scopes: [
+      "read_products",
+      "write_products",
+      "read_themes",
+      "write_themes",
+      "read_content",
+      "write_content"
+    ],
+    apiVersion: ApiVersion.October24,
+    isEmbeddedApp: true,
+    appDistribution: AppDistribution.AppStore,
+    appUrl,
+    sessionStorage: new PrismaSessionStorage(prisma),
+    billing: {
+      Free: {
+        amount: 0,
+        currencyCode: "USD",
+        interval: "EVER_30_DAYS",
+        usageTerms: "50 image generations per month"
+      },
+      Starter: {
+        amount: 9,
+        currencyCode: "USD",
+        interval: "EVER_30_DAYS",
+        usageTerms: "300 image generations per month"
+      },
+      Professional: {
+        amount: 19,
+        currencyCode: "USD",
+        interval: "EVER_30_DAYS",
+        usageTerms: "1000 image generations per month"
+      },
+      Business: {
+        amount: 49,
+        currencyCode: "USD",
+        interval: "EVER_30_DAYS",
+        usageTerms: "5000 image generations per month"
+      }
     },
-    Starter: {
-      amount: 9,
-      currencyCode: "USD",
-      interval: "EVER_30_DAYS",
-      usageTerms: "300 image generations per month"
+    hooks: {
+      afterAuth: async ({ session }) => {
+        const shop = session.shop;
+        console.log(`[AltOptimizer] App installed for shop: ${shop}`);
+      }
     },
-    Professional: {
-      amount: 19,
-      currencyCode: "USD",
-      interval: "EVER_30_DAYS",
-      usageTerms: "1000 image generations per month"
+    webhooks: {
+      APP_UNINSTALLED: {
+        deliveryMethod: "http",
+        callbackUrl: "/webhooks/app/uninstalled"
+      },
+      SHOP_REDACT: {
+        deliveryMethod: "http",
+        callbackUrl: "/webhooks/shop/redact"
+      },
+      CUSTOMERS_DATA_REQUEST: {
+        deliveryMethod: "http",
+        callbackUrl: "/webhooks/customers/data_request"
+      },
+      APP_SUBSCRIPTIONS_UPDATE: {
+        deliveryMethod: "http",
+        callbackUrl: "/webhooks/billing/update"
+      },
+      APP_SUBSCRIPTIONS_DECLINE: {
+        deliveryMethod: "http",
+        callbackUrl: "/webhooks/billing/decline"
+      }
     },
-    Business: {
-      amount: 49,
-      currencyCode: "USD",
-      interval: "EVER_30_DAYS",
-      usageTerms: "5000 image generations per month"
+    future: {
+      unstable_newEmbeddedAuthStrategy: true
     }
-  },
-  hooks: {
-    afterAuth: async ({ session }) => {
-      const shop = session.shop;
-      console.log(`[AltOptimizer] App installed for shop: ${shop}`);
+  };
+}
+let _shopify = null;
+function getShopify() {
+  if (!_shopify) {
+    const config = getShopifyConfig();
+    if (!config.apiKey || !config.apiSecretKey) {
+      throw new Error(
+        "Shopify app not configured. Set SHOPIFY_API_KEY and SHOPIFY_API_SECRET environment variables."
+      );
     }
-  },
-  webhooks: {
-    APP_UNINSTALLED: {
-      deliveryMethod: "http",
-      callbackUrl: "/webhooks/app/uninstalled"
-    },
-    SHOP_REDACT: {
-      deliveryMethod: "http",
-      callbackUrl: "/webhooks/shop/redact"
-    },
-    CUSTOMERS_DATA_REQUEST: {
-      deliveryMethod: "http",
-      callbackUrl: "/webhooks/customers/data_request"
-    }
+    _shopify = shopifyApp(config);
   }
-});
-const { authenticate, registerWebhooks, sessionStorage, addDocumentResponseHeaders } = shopify;
-ApiVersion.October24;
+  return _shopify;
+}
+function getShopifySafe() {
+  try {
+    return getShopify();
+  } catch {
+    return null;
+  }
+}
+const authenticate = {
+  admin: (request) => {
+    const shopify = getShopify();
+    return shopify.authenticate.admin(request);
+  },
+  webhook: (request) => {
+    const shopify = getShopify();
+    return shopify.authenticate.webhook(request);
+  },
+  public: (request) => {
+    const shopify = getShopify();
+    return shopify.authenticate.public(request);
+  }
+};
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || ""
 });
@@ -3750,7 +3798,11 @@ function ErrorBoundary() {
   return /* @__PURE__ */ jsx(Boundary, { error });
 }
 const headers = (headersParams) => {
-  return shopify.addDocumentResponseHeaders(headersParams);
+  const shopify = getShopifySafe();
+  if (shopify) {
+    return shopify.addDocumentResponseHeaders(headersParams);
+  }
+  return new Headers();
 };
 const route11 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,

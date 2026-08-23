@@ -10,7 +10,7 @@ import {
   Box,
 } from "@shopify/polaris";
 import { Boundary } from "~/components/Boundary";
-import shopifyApp, { authenticate } from "~/shopify.server";
+import { getShopifySafe, authenticate } from "~/shopify.server";
 import { AppNav } from "~/components/AppNav";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -62,5 +62,9 @@ export function ErrorBoundary() {
 }
 
 export const headers: HeadersFunction = (headersParams) => {
-  return shopifyApp.addDocumentResponseHeaders(headersParams);
+  const shopify = getShopifySafe();
+  if (shopify) {
+    return shopify.addDocumentResponseHeaders(headersParams);
+  }
+  return new Headers();
 };
