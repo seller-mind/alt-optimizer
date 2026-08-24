@@ -2,7 +2,7 @@
 # https://shopify.dev/docs/apps/build/cli-for-shopify/app-configuration
 
 client_id = ""
-application_url = "https://localhost:5000"
+application_url = "https://alt-optimizer.vercel.app"
 embedded = true
 name = "AltOptimizer"
 description = "AI-powered product image optimizer. Generate SEO-optimized alt text, product tags, and JSON-LD structured data for your Shopify store."
@@ -13,9 +13,9 @@ automatically_update_urls_on_dev = true
 
 [auth]
 redirect_urls = [
-  "https://localhost:5000/auth/callback",
-  "https://localhost:5000/auth/shopify/callback",
-  "https://localhost:5000/auth"
+  "https://alt-optimizer.vercel.app/auth/callback",
+  "https://alt-optimizer.vercel.app/auth/shopify/callback",
+  "https://alt-optimizer.vercel.app/auth"
 ]
 
 [access_scopes]
@@ -46,8 +46,8 @@ api_version = "2024-10"
 embedded = false
 
 [privacy]
-privacy_policy_url = "https://localhost:5000/privacy"
-terms_of_service_url = "https://localhost:5000/terms"
+privacy_policy_url = "https://alt-optimizer.vercel.app/privacy"
+terms_of_service_url = "https://alt-optimizer.vercel.app/terms"
 
 [app_preferences]
 # App preferences
