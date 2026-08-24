@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
+import { createHmac, timingSafeEqual } from "crypto";
 import prisma from "~/db.server";
 import { deleteShopData } from "~/services/billing.server";
 
@@ -13,13 +14,32 @@ export async function action({ request }: ActionFunctionArgs) {
     const shopDomain = request.headers.get("x-shopify-shop-domain") || "";
     const hmac = request.headers.get("x-shopify-hmac-sha256") || "";
 
-    // Verify HMAC for security
+    const body = await request.text();
+
+    // Verify HMAC signature for security
     if (!hmac) {
       console.warn(`[Webhook] Missing HMAC for topic: ${topic}`);
       return json({ error: "Missing HMAC" }, { status: 401 });
     }
 
-    const body = await request.text();
+    const secret = process.env.SHOPIFY_API_SECRET;
+    if (!secret) {
+      console.error("[Webhook] SHOPIFY_API_SECRET not configured");
+      return json({ error: "Server configuration error" }, { status: 500 });
+    }
+
+    const hash = createHmac("sha256", secret).update(body, "utf8").digest("base64");
+    const hmacBuffer = Buffer.from(hmac, "base64");
+    const hashBuffer = Buffer.from(hash, "base64");
+
+    if (
+      hmacBuffer.length !== hashBuffer.length ||
+      !timingSafeEqual(hmacBuffer, hashBuffer)
+    ) {
+      console.warn(`[Webhook] Invalid HMAC for topic: ${topic}`);
+      return json({ error: "Invalid HMAC" }, { status: 401 });
+    }
+
     let payload: any;
     try {
       payload = JSON.parse(body);

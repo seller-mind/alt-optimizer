@@ -59,23 +59,23 @@ function getShopifyConfig() {
     webhooks: {
       APP_UNINSTALLED: {
         deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks/app/uninstalled",
+        callbackUrl: "/webhooks",
       },
       SHOP_REDACT: {
         deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks/shop/redact",
+        callbackUrl: "/webhooks",
       },
       CUSTOMERS_DATA_REQUEST: {
         deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks/customers/data_request",
+        callbackUrl: "/webhooks",
       },
       APP_SUBSCRIPTIONS_UPDATE: {
         deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks/billing/update",
+        callbackUrl: "/webhooks",
       },
       APP_SUBSCRIPTIONS_DECLINE: {
         deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks/billing/decline",
+        callbackUrl: "/webhooks",
       },
     },
     future: {

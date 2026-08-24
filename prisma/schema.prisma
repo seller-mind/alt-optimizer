@@ -32,6 +32,7 @@ model Shop {
   uninstallDate DateTime? @map("uninstall_date")
   dataRetentionUntil DateTime? @map("data_retention_until")
   lastQuotaResetAt DateTime @default(now()) @map("last_quota_reset_at")
+  onboardingStep   String?  @default("welcome") @map("onboarding_step")
 
   products        Product[]
   backupSnapshots BackupSnapshot[]

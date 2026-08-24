@@ -66,14 +66,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "update_plan") {
     const newPlan = formData.get("plan") as string;
-    if (PLANS[newPlan]) {
-      await prisma.shop.update({
-        where: { id: shop.id },
-        data: { planType: newPlan },
-      });
-      return json({ success: true, message: `Plan updated to ${PLANS[newPlan].name}.` });
+    if (newPlan === "free" || !PLANS[newPlan]) {
+      return json({ success: false, error: "Please use the Shopify billing flow to change your plan." });
     }
-    return json({ success: false, error: "Invalid plan." });
+    // Plan changes should go through Shopify Billing API, not direct DB update.
+    // Redirect user to Shopify subscription management.
+    return json({
+      success: false,
+      error: "Plan upgrades are managed through Shopify. Please visit the Shopify App Store to change your subscription.",
+    });
   }
 
   if (intent === "update_locale") {

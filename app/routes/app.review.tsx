@@ -43,6 +43,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const imagesWhere: Record<string, unknown> = {
     altTextAi: { not: null },
+    product: { shopId: shop.id },
   };
 
   if (filter !== "all") {
@@ -64,12 +65,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   const allWithAi = await prisma.productImage.count({
-    where: { altTextAi: { not: null } },
+    where: { altTextAi: { not: null }, product: { shopId: shop.id } },
   });
 
   const counts = await prisma.productImage.groupBy({
     by: ["status"],
-    where: { altTextAi: { not: null } },
+    where: { altTextAi: { not: null }, product: { shopId: shop.id } },
     _count: true,
   });
 
@@ -126,8 +127,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       for (const imageIdStr of imageIds) {
         const imageId = parseInt(imageIdStr, 10);
-        const image = await prisma.productImage.findUnique({
-          where: { id: imageId },
+        const image = await prisma.productImage.findFirst({
+          where: { id: imageId, product: { shopId: shop.id } },
         });
 
         if (!image || !image.altTextAi) continue;
@@ -162,16 +163,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (intent === "reject") {
       const imageIds = formData.getAll("imageIds") as string[];
+      let rejected = 0;
 
       for (const imageIdStr of imageIds) {
         const imageId = parseInt(imageIdStr, 10);
+        const image = await prisma.productImage.findFirst({
+          where: { id: imageId, product: { shopId: shop.id } },
+        });
+        if (!image) continue;
+
         await prisma.productImage.update({
           where: { id: imageId },
           data: { status: "rejected" },
         });
+        rejected++;
       }
 
-      return json({ success: true, rejected: imageIds.length, intent: "reject" });
+      return json({ success: true, rejected, intent: "reject" });
     }
 
     if (intent === "edit") {
@@ -186,8 +194,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ success: false, error: "Alt text must be 125 characters or less", intent: "edit" });
       }
 
-      const image = await prisma.productImage.findUnique({
-        where: { id: imageId },
+      const image = await prisma.productImage.findFirst({
+        where: { id: imageId, product: { shopId: shop.id } },
       });
 
       if (!image) {

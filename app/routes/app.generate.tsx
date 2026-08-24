@@ -113,14 +113,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       error?: string;
     }> = [];
 
-    for (const imageIdStr of imageIds) {
-      const imageId = parseInt(imageIdStr, 10);
+    const imageIdsArray = imageIds.map((id) => parseInt(id, 10));
+    const CONCURRENCY = 3;
+
+    const processImage = async (imageId: number) => {
       const image = await prisma.productImage.findUnique({
         where: { id: imageId },
         include: { product: true },
       });
 
-      if (!image) continue;
+      if (!image) return null;
 
       try {
         const { base64, mimeType } = await fetchImageAsBase64(image.src);
@@ -151,16 +153,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
-        results.push({
+        return {
           imageId,
           imageSrc: image.src,
           productTitle: image.product.title,
           altText: analysis.altText,
-          success: true,
-        });
+          success: true as const,
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
-        // Categorize errors for better user feedback
         let friendlyError = message;
         if (message.includes("429") || message.includes("rate limit")) {
           friendlyError = "OpenAI rate limit hit. Please wait a moment and try again.";
@@ -172,13 +173,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           friendlyError = "Invalid image data. Skipping this image.";
         }
 
-        results.push({
+        return {
           imageId,
           altText: "",
-          success: false,
+          success: false as const,
           error: friendlyError,
-        });
+        };
       }
+    };
+
+    // Process images in batches of CONCURRENCY
+    for (let i = 0; i < imageIdsArray.length; i += CONCURRENCY) {
+      const batch = imageIdsArray.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(batch.map((imageId) => processImage(imageId)));
+      results.push(...batchResults.filter((r): r is NonNullable<typeof r> => r !== null));
     }
 
     const successCount = results.filter((r) => r.success).length;

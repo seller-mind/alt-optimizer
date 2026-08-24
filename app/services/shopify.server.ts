@@ -38,11 +38,9 @@ export async function fetchProducts(
   admin: any,
   cursor: string | null = null
 ): Promise<ProductListResult> {
-  const afterClause = cursor ? `, after: "${cursor}"` : "";
-
-  const response = await admin.graphql(`
-    {
-      products(first: 50${afterClause}) {
+  const response = await admin.graphql(
+    `query FetchProducts($first: Int!, $after: String) {
+      products(first: $first, after: $after) {
         edges {
           cursor
           node {
@@ -83,8 +81,14 @@ export async function fetchProducts(
           endCursor
         }
       }
+    }`,
+    {
+      variables: {
+        first: 50,
+        after: cursor,
+      },
     }
-  `);
+  );
 
   const data = await response.json();
   const products = data.data.products.edges.map((edge: any) => ({
@@ -125,23 +129,19 @@ export async function updateImageAltText(
   imageId: string,
   altText: string
 ): Promise<boolean> {
-  const response = await admin.graphql(`
-    mutation {
-      productUpdateMedia(media: [{
-        id: "${imageId}",
-        alt: "${altText.replace(/"/g, '\\"')}"
-      }]) {
-        media {
-          id
-          alt
-        }
-        mediaUserErrors {
-          field
-          message
-        }
+  const response = await admin.graphql(
+    `mutation UpdateMediaAlt($media: [MediaUpdateInput!]!) {
+      productUpdateMedia(media: $media) {
+        media { id alt }
+        mediaUserErrors { field message }
       }
+    }`,
+    {
+      variables: {
+        media: [{ id: imageId, alt: altText }],
+      },
     }
-  `);
+  );
 
   const data = await response.json();
   const errors = data.data?.productUpdateMedia?.mediaUserErrors;
@@ -179,11 +179,27 @@ export async function updateProductTags(
 }
 
 export async function fetchImageAsBase64(imageUrl: string): Promise<{ base64: string; mimeType: string }> {
-  const response = await fetch(imageUrl);
-  const contentType = response.headers.get("content-type") || "image/jpeg";
-  const buffer = await response.arrayBuffer();
-  const base64 = Buffer.from(buffer).toString("base64");
-  return { base64, mimeType: contentType };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch(imageUrl, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+    }
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+    if (!contentType.startsWith("image/")) {
+      throw new Error(`Invalid content type: ${contentType}`);
+    }
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength > 20 * 1024 * 1024) {
+      throw new Error("Image too large (max 20MB)");
+    }
+    const base64 = Buffer.from(buffer).toString("base64");
+    return { base64, mimeType: contentType };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function getProductCount(admin: any): Promise<number> {
