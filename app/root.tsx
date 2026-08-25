@@ -1,4 +1,15 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError, isRouteErrorResponse, useLocation } from "@remix-run/react";
+import {
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  useRouteError,
+  isRouteErrorResponse,
+  useLocation,
+} from "@remix-run/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { Page, Card, Text, EmptyState, Button } from "@shopify/polaris";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
@@ -6,11 +17,22 @@ import en from "@shopify/polaris/locales/en.json";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const url = new URL(request.url);
+  const shop = url.searchParams.get("shop");
+
+  // If no shop param and we're at root or /app, redirect to install
+  if (!shop && (url.pathname === "/" || url.pathname === "/app" || url.pathname.startsWith("/app/"))) {
+    return redirect("/install");
+  }
+
+  return null;
+};
+
 export default function App() {
   const location = useLocation();
 
-  // If there's a shop query param but we're not on a valid route,
-  // redirect to install to start OAuth
+  // Client-side redirect for shop param
   if (location.search.includes("shop=") && location.pathname === "/") {
     const params = new URLSearchParams(location.search);
     const shop = params.get("shop");
@@ -73,7 +95,7 @@ export function ErrorBoundary() {
             <Card>
               <EmptyState
                 heading={title}
-                action={{ content: "Try Again", onAction: () => window.location.reload() }}
+                action={{ content: "Try Again", onAction: () => window.location.href = "/install" }}
               >
                 <Text as="p">{description}</Text>
               </EmptyState>
