@@ -1,16 +1,13 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
+import prisma from "~/db.server";
 
 /**
- * Health check endpoint for Render platform.
- * Render pings this URL to verify the service is running.
- * Returns 200 if healthy, 503 if not.
+ * Health check endpoint.
+ * Returns 200 if healthy, 503 if database is unreachable.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    // Verify database connection
+    if (!prisma) throw new Error("Prisma not initialized");
     await prisma.$queryRaw`SELECT 1`;
 
     return new Response(
