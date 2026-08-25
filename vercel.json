@@ -1,5 +1,5 @@
 {
-  "buildCommand": "pnpm run build",
+  "buildCommand": "npx prisma generate && npx prisma db push --skip-generate && pnpm run build",
   "installCommand": "pnpm install",
   "framework": "remix"
 }

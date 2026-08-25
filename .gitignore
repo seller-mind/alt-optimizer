@@ -94,3 +94,4 @@ logs/
 
 # CodeGraph index
 .codegraph
+.env*
