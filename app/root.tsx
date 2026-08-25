@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   Links,
   Meta,
@@ -7,7 +8,6 @@ import {
   useRouteError,
   isRouteErrorResponse,
   useLocation,
-  useEffect,
 } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
@@ -32,7 +32,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export default function App() {
   const location = useLocation();
 
-  // Client-side redirect for shop param — must use useEffect to avoid SSR crash
+  // Client-side redirect for shop param — useEffect only runs on client
   useEffect(() => {
     if (location.search.includes("shop=") && location.pathname === "/") {
       const params = new URLSearchParams(location.search);
@@ -66,16 +66,17 @@ export default function App() {
 export function ErrorBoundary() {
   const error = useRouteError();
   let title = "Something went wrong";
-  let description = "An unexpected error occurred. Please try again.";
+  let description = "An unexpected error occurred.";
 
   if (isRouteErrorResponse(error)) {
     title = `Error ${error.status}`;
-    description =
-      error.status === 404
-        ? "The page you're looking for doesn't exist."
-        : error.status === 403
-          ? "You don't have permission to access this page."
-          : error.statusText || description;
+    if (error.status === 404) {
+      description = "The page you're looking for doesn't exist.";
+    } else if (error.status === 403) {
+      description = "You don't have permission to access this page.";
+    } else {
+      description = error.statusText || description;
+    }
   } else if (error instanceof Error) {
     description = error.message || description;
   }
@@ -96,9 +97,7 @@ export function ErrorBoundary() {
             <h2>{title}</h2>
             <p>{description}</p>
             <p style={{ marginTop: 20 }}>
-              <a href="/install" style={{ color: "#008060", textDecoration: "underline" }}>
-                Go to Install Page
-              </a>
+              <a href="/install">Go to Install Page</a>
             </p>
           </div>
         </AppProvider>
