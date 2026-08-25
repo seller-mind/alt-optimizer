@@ -1,5 +1,4 @@
 # Shopify App Configuration
-# https://shopify.dev/docs/apps/build/cli-for-shopify/app-configuration
 
 client_id = "bf1b9b6eef0ca0ed0584705f23681ddd"
 application_url = "https://alt-optimizer.vercel.app"
@@ -19,40 +18,21 @@ redirect_urls = [
 ]
 
 [access_scopes]
-# Using legacy scopes for compatibility
-use_legacy_install_flow = true
 scopes = "read_products,write_products,read_themes,write_themes,read_content,write_content"
 
 [webhooks]
 api_version = "2026-07"
 
-  [webhooks.subscriptions]
-  [webhooks.subscriptions.app_uninstalled]
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
   uri = "/webhooks/app/uninstalled"
 
-  [webhooks.subscriptions.shop_redact]
-  uri = "/webhooks/shop/redact"
-
-  [webhooks.subscriptions.customers_data_request]
-  uri = "/webhooks/customers/data_request"
-
-  [webhooks.subscriptions.app_subscriptions_update]
+  [[webhooks.subscriptions]]
+  topics = ["app_subscriptions/update"]
   uri = "/webhooks/app/subscriptions/update"
-
-  [webhooks.subscriptions.app_subscriptions_decline]
-  uri = "/webhooks/app/subscriptions/decline"
 
 [pos]
 embedded = false
 
-[privacy]
-privacy_policy_url = "https://alt-optimizer.vercel.app/privacy"
-terms_of_service_url = "https://alt-optimizer.vercel.app/terms"
-
 [app_preferences]
-# App preferences
-gtm_container_id = ""
-
-[branding]
-# App branding
-# See https://shopify.dev/docs/apps/build/cli-for-shopify/app-configuration#branding
+url = "https://alt-optimizer.vercel.app"

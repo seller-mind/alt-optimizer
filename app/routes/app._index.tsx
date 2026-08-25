@@ -32,8 +32,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shopDomain: session.shop },
   });
 
+  // Auto-create shop record if missing (e.g., afterAuth did not create it)
   if (!shop) {
-    throw new Response("Shop not found", { status: 404 });
+    shop = await prisma.shop.create({
+      data: {
+        shopDomain: session.shop,
+        accessToken: session.accessToken || "",
+        planType: "free",
+        status: "active",
+      },
+    });
+    console.log(`[AltOptimizer] Auto-created missing shop record for: ${session.shop}`);
   }
 
   const [stats, usage] = await Promise.all([
