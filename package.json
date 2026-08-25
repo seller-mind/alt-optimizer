@@ -6,7 +6,7 @@
   "packageManager": "pnpm@10.30.3",
   "type": "module",
   "scripts": {
-    "build": "prisma migrate deploy && prisma generate && remix vite:build",
+    "build": "prisma generate && remix vite:build",
     "dev": "prisma generate && remix vite:dev",
     "start": "PORT=${DEPLOY_RUN_PORT:-3000} remix-serve ./build/server/index.js",
     "generate": "prisma generate",

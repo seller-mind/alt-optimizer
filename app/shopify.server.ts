@@ -21,7 +21,7 @@ function getShopifyConfig() {
     ],
     apiVersion: ApiVersion.October24,
     isEmbeddedApp: true,
-    appDistribution: AppDistribution.AppStore,
+    appDistribution: AppDistribution.MultiTenant,
     appUrl,
     sessionStorage: new PrismaSessionStorage(prisma),
     billing: {
