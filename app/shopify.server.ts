@@ -51,9 +51,39 @@ function getShopifyConfig() {
       },
     },
     hooks: {
-      afterAuth: async ({ session }: { session: { shop: string } }) => {
+      afterAuth: async ({ session }: { session: { shop: string; accessToken?: string } }) => {
         const shop = session.shop;
         console.log(`[AltOptimizer] App installed for shop: ${shop}`);
+        
+        // Create or update shop record in database
+        try {
+          const existingShop = await prisma.shop.findUnique({
+            where: { shopDomain: shop },
+          });
+          
+          if (!existingShop) {
+            await prisma.shop.create({
+              data: {
+                shopDomain: shop,
+                accessToken: session.accessToken || "",
+                planType: "free",
+                status: "active",
+              },
+            });
+            console.log(`[AltOptimizer] Created shop record for: ${shop}`);
+          } else {
+            await prisma.shop.update({
+              where: { shopDomain: shop },
+              data: {
+                status: "active",
+                accessToken: session.accessToken || existingShop.accessToken,
+              },
+            });
+            console.log(`[AltOptimizer] Updated shop record for: ${shop}`);
+          }
+        } catch (error) {
+          console.error(`[AltOptimizer] Failed to create/update shop record:`, error);
+        }
       },
     },
     webhooks: {
