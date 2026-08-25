@@ -1,4 +1,5 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError, isRouteErrorResponse } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { Page, Card, Text, EmptyState, Button } from "@shopify/polaris";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
@@ -6,7 +7,17 @@ import en from "@shopify/polaris/locales/en.json";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  // Provide Shopify API key for AppProvider
+  const apiKey = process.env.SHOPIFY_API_KEY || "";
+  const shop = new URL(request.url).searchParams.get("shop") || "";
+  
+  return { apiKey, shop };
+};
+
 export default function App() {
+  const { apiKey, shop } = useLoaderData<typeof loader>();
+
   return (
     <html lang="en">
       <head>
@@ -17,7 +28,7 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <AppProvider i18n={en} isEmbeddedApp>
+        <AppProvider i18n={en} isEmbeddedApp apiKey={apiKey} shop={shop}>
           <Outlet />
         </AppProvider>
         <ScrollRestoration />
@@ -55,7 +66,7 @@ export function ErrorBoundary() {
         <link rel="stylesheet" href={polarisStyles} />
       </head>
       <body>
-        <AppProvider i18n={en} isEmbeddedApp>
+        <AppProvider i18n={en} isEmbeddedApp apiKey={process.env.SHOPIFY_API_KEY || ""}>
           <Page>
             <Card>
               <EmptyState

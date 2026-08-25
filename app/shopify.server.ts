@@ -7,10 +7,21 @@ function getShopifyConfig() {
   const apiKey = process.env.SHOPIFY_API_KEY;
   const apiSecretKey = process.env.SHOPIFY_API_SECRET;
   const appUrl = process.env.SHOPIFY_APP_URL || process.env.HOST || "https://localhost:5000";
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (!apiKey || !apiSecretKey) {
+    throw new Error(
+      `Missing Shopify credentials: SHOPIFY_API_KEY=${!!apiKey}, SHOPIFY_API_SECRET=${!!apiSecretKey}`
+    );
+  }
+
+  if (!databaseUrl) {
+    throw new Error("Missing DATABASE_URL environment variable");
+  }
 
   return {
-    apiKey: apiKey || "",
-    apiSecretKey: apiSecretKey || "",
+    apiKey,
+    apiSecretKey,
     scopes: [
       "read_products",
       "write_products",
@@ -56,6 +67,10 @@ function getShopifyConfig() {
         console.log(`[AltOptimizer] App installed for shop: ${shop}`);
         
         try {
+          if (!prisma) {
+            console.error("[AltOptimizer] Prisma not available, skipping shop record creation");
+            return;
+          }
           const existingShop = await prisma.shop.findUnique({
             where: { shopDomain: shop },
           });
@@ -69,7 +84,6 @@ function getShopifyConfig() {
                 status: "active",
               },
             });
-            console.log(`[AltOptimizer] Created shop record for: ${shop}`);
           } else {
             await prisma.shop.update({
               where: { shopDomain: shop },
@@ -78,7 +92,6 @@ function getShopifyConfig() {
                 accessToken: session.accessToken || existingShop.accessToken,
               },
             });
-            console.log(`[AltOptimizer] Updated shop record for: ${shop}`);
           }
         } catch (error) {
           console.error(`[AltOptimizer] Failed to create/update shop record:`, error);
@@ -86,45 +99,34 @@ function getShopifyConfig() {
       },
     },
     webhooks: {
-      APP_UNINSTALLED: {
-        deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks",
-      },
-      SHOP_REDACT: {
-        deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks",
-      },
-      CUSTOMERS_DATA_REQUEST: {
-        deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks",
-      },
-      APP_SUBSCRIPTIONS_UPDATE: {
-        deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks",
-      },
-      APP_SUBSCRIPTIONS_DECLINE: {
-        deliveryMethod: "http" as const,
-        callbackUrl: "/webhooks",
-      },
+      APP_UNINSTALLED: { deliveryMethod: "http" as const, callbackUrl: "/webhooks" },
+      SHOP_REDACT: { deliveryMethod: "http" as const, callbackUrl: "/webhooks" },
+      CUSTOMERS_DATA_REQUEST: { deliveryMethod: "http" as const, callbackUrl: "/webhooks" },
+      APP_SUBSCRIPTIONS_UPDATE: { deliveryMethod: "http" as const, callbackUrl: "/webhooks" },
+      APP_SUBSCRIPTIONS_DECLINE: { deliveryMethod: "http" as const, callbackUrl: "/webhooks" },
     },
-    // REMOVED: unstable_newEmbeddedAuthStrategy - was causing blank page in iframe
-    // The default cookie-based auth is stable and proven to work in embedded apps
   };
 }
 
 let _shopify: ReturnType<typeof shopifyApp> | null = null;
+let _shopifyError: Error | null = null;
 
 function getShopify(): ReturnType<typeof shopifyApp> {
-  if (!_shopify) {
-    const config = getShopifyConfig();
-    if (!config.apiKey || !config.apiSecretKey) {
-      throw new Error(
-        "Shopify app not configured. Set SHOPIFY_API_KEY and SHOPIFY_API_SECRET environment variables."
-      );
+  if (!_shopify && !_shopifyError) {
+    try {
+      const config = getShopifyConfig();
+      _shopify = shopifyApp(config);
+    } catch (error) {
+      _shopifyError = error instanceof Error ? error : new Error(String(error));
+      console.error("[AltOptimizer] shopifyApp initialization failed:", _shopifyError);
     }
-    _shopify = shopifyApp(config);
   }
-  return _shopify;
+  
+  if (_shopifyError) {
+    throw _shopifyError;
+  }
+  
+  return _shopify!;
 }
 
 function getShopifySafe(): ReturnType<typeof shopifyApp> | null {

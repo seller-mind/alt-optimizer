@@ -1,8 +1,6 @@
-import type { HeadersFunction } from "@remix-run/node";
 import { Link, Outlet, useRouteError } from "@remix-run/react";
 import { Box, InlineStack, Text } from "@shopify/polaris";
 import { Boundary } from "~/components/Boundary";
-import { getShopifySafe } from "~/shopify.server";
 import { AppNav } from "~/components/AppNav";
 
 export default function AppLayout() {
@@ -46,11 +44,3 @@ export function ErrorBoundary() {
   const error = useRouteError();
   return <Boundary error={error} />;
 }
-
-export const headers: HeadersFunction = (headersParams) => {
-  const shopify = getShopifySafe();
-  if (shopify) {
-    return shopify.addDocumentResponseHeaders(headersParams);
-  }
-  return new Headers();
-};
