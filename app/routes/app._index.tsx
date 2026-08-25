@@ -31,10 +31,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = await getOrCreateShop(session.shop);
 
-  const [stats, usage] = await Promise.all([
-    getDashboardStats(shop.id),
-    getCurrentUsage(shop.id),
-  ]);
+  let stats, usage;
+  try {
+    [stats, usage] = await Promise.all([
+      getDashboardStats(shop.id),
+      getCurrentUsage(shop.id),
+    ]);
+  } catch (dbError) {
+    console.error("[AltOptimizer] DB query failed, using defaults:", dbError);
+    stats = {
+      totalProducts: 0,
+      totalImages: 0,
+      imagesWithAlt: 0,
+      imagesWithAi: 0,
+      imagesPending: 0,
+      totalGenerated: 0,
+      totalApiCalls: 0,
+    };
+    usage = {
+      imagesGenerated: 0,
+      tagsGenerated: 0,
+      jsonLdGenerated: 0,
+      apiCalls: 0,
+      quota: 50,
+      percentage: 0,
+      planName: "Free",
+      planType: "free",
+      remaining: 50,
+    };
+  }
 
   const isNewUser = stats.totalProducts === 0;
   const showOnboarding = isNewUser || shop.onboardingStep !== "completed";

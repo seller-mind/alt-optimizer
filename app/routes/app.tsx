@@ -14,7 +14,8 @@ import { getShopifySafe, authenticate } from "~/shopify.server";
 import { AppNav } from "~/components/AppNav";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  // Auth is handled by child routes (app._index.tsx etc.)
+  // Don't call authenticate.admin here to avoid double-auth redirect issues
   return null;
 };
 
