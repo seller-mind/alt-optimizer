@@ -1,23 +1,9 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/node";
-import { Link, Outlet, useLoaderData, useRouteError } from "@remix-run/react";
-import {
-  Page,
-  Layout,
-  Text,
-  Card,
-  BlockStack,
-  InlineStack,
-  Box,
-} from "@shopify/polaris";
+import type { HeadersFunction } from "@remix-run/node";
+import { Link, Outlet, useRouteError } from "@remix-run/react";
+import { Box, InlineStack, Text } from "@shopify/polaris";
 import { Boundary } from "~/components/Boundary";
-import { getShopifySafe, authenticate } from "~/shopify.server";
+import { getShopifySafe } from "~/shopify.server";
 import { AppNav } from "~/components/AppNav";
-
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // Auth is handled by child routes (app._index.tsx etc.)
-  // Don't call authenticate.admin here to avoid double-auth redirect issues
-  return null;
-};
 
 export default function AppLayout() {
   return (
@@ -26,7 +12,6 @@ export default function AppLayout() {
       <Box flex={1}>
         <Outlet />
       </Box>
-      {/* App Footer */}
       <Box
         padding="300"
         borderBlockStart="025"
