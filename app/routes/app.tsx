@@ -1,7 +1,14 @@
-import { Link, Outlet, useRouteError } from "@remix-run/react";
+import { Outlet, useRouteError } from "@remix-run/react";
 import { Box, InlineStack, Text } from "@shopify/polaris";
 import { Boundary } from "~/components/Boundary";
 import { AppNav } from "~/components/AppNav";
+import { authenticate } from "~/shopify.server";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  await authenticate.admin(request);
+  return null;
+};
 
 export default function AppLayout() {
   return (
@@ -20,20 +27,7 @@ export default function AppLayout() {
             <Text as="p" variant="bodySm" tone="subdued">
               AltOptimizer v1.0.0
             </Text>
-            <Text as="p" variant="bodySm" tone="subdued">
-              <Link to="/privacy" style={{ textDecoration: "none" }}>
-                Privacy Policy
-              </Link>
-            </Text>
-            <Text as="p" variant="bodySm" tone="subdued">
-              <Link to="/terms" style={{ textDecoration: "none" }}>
-                Terms of Service
-              </Link>
-            </Text>
           </InlineStack>
-          <Text as="p" variant="bodySm" tone="subdued">
-            Support: support@altoptimizer.com
-          </Text>
         </InlineStack>
       </Box>
     </Box>

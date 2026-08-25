@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import {
   Links,
   Meta,
@@ -7,42 +6,21 @@ import {
   ScrollRestoration,
   useRouteError,
   isRouteErrorResponse,
-  useLocation,
 } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
+import { json } from "@remix-run/node";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import en from "@shopify/polaris/locales/en.json";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  const shop = url.searchParams.get("shop");
-
-  // If no shop param and we're at root or /app routes, redirect to install
-  if (!shop && (url.pathname === "/" || url.pathname === "/app" || url.pathname.startsWith("/app/"))) {
-    return redirect("/install");
-  }
-
-  return null;
+export const loader = async () => {
+  return json({
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+  });
 };
 
 export default function App() {
-  const location = useLocation();
-
-  // Client-side redirect for shop param — useEffect only runs on client
-  useEffect(() => {
-    if (location.search.includes("shop=") && location.pathname === "/") {
-      const params = new URLSearchParams(location.search);
-      const shop = params.get("shop");
-      if (shop) {
-        window.location.href = `/install?shop=${shop}`;
-      }
-    }
-  }, [location]);
-
   return (
     <html lang="en">
       <head>
@@ -53,7 +31,7 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <AppProvider i18n={en} isEmbeddedApp>
+        <AppProvider i18n={en} apiKey={process.env.SHOPIFY_API_KEY || ""} isEmbeddedApp>
           <Outlet />
         </AppProvider>
         <ScrollRestoration />
@@ -92,13 +70,10 @@ export function ErrorBoundary() {
         <link rel="stylesheet" href={polarisStyles} />
       </head>
       <body>
-        <AppProvider i18n={en} isEmbeddedApp>
+        <AppProvider i18n={en} apiKey={process.env.SHOPIFY_API_KEY || ""} isEmbeddedApp>
           <div style={{ padding: 40, textAlign: "center" }}>
             <h2>{title}</h2>
             <p>{description}</p>
-            <p style={{ marginTop: 20 }}>
-              <a href="/install">Go to Install Page</a>
-            </p>
           </div>
         </AppProvider>
         <Scripts />

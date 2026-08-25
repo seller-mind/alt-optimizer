@@ -1,21 +1,16 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
-import { Page, Card, Text, BlockStack, Button, Link as PolarisLink } from "@shopify/polaris";
+import { Page, Card, Text, BlockStack, Button } from "@shopify/polaris";
 import { useState } from "react";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
 
+  // If shop param is present, redirect to /app which triggers authenticate.admin()
+  // The SDK handles the full OAuth flow automatically
   if (shop) {
-    const apiKey = process.env.SHOPIFY_API_KEY;
-    const scopes = "read_products,write_products,read_themes,write_themes,read_content,write_content";
-    const appUrl = process.env.SHOPIFY_APP_URL || "https://alt-optimizer.vercel.app";
-    const redirectUri = `${appUrl}/auth/callback`;
-
-    const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${apiKey}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${Date.now()}`;
-
-    return redirect(authUrl);
+    return redirect(`/app?shop=${encodeURIComponent(shop)}`);
   }
 
   return null;
@@ -26,8 +21,7 @@ export default function Install() {
 
   const handleInstall = () => {
     const appUrl = "https://alt-optimizer.vercel.app";
-    const installUrl = `${appUrl}/install?shop=${encodeURIComponent(shop)}`;
-    window.open(installUrl, "_blank");
+    window.location.href = `${appUrl}/app?shop=${encodeURIComponent(shop)}`;
   };
 
   return (
@@ -58,7 +52,7 @@ export default function Install() {
             Install App →
           </Button>
           <Text as="p" variant="bodySm" tone="subdued">
-            This will open a new tab to complete Shopify OAuth authorization.
+            You will be redirected to Shopify to authorize the app.
           </Text>
         </BlockStack>
       </Card>
