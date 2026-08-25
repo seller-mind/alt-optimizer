@@ -25,18 +25,13 @@ import { useState, useCallback, useMemo } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { updateImageAltText } from "~/services/shopify.server";
+import { getOrCreateShop } from "~/utils/shop.server";
 
 type ReviewFilter = "all" | "pending" | "approved" | "rejected";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  if (!shop) {
-    throw new Response("Shop not found", { status: 404 });
-  }
+  const shop = await getOrCreateShop(session.shop);
 
   const url = new URL(request.url);
   const filter = (url.searchParams.get("filter") || "pending") as ReviewFilter;
@@ -108,13 +103,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  if (!shop) {
-    throw new Response("Shop not found", { status: 404 });
-  }
+  const shop = await getOrCreateShop(session.shop);
 
   const formData = await request.formData();
   const intent = formData.get("intent") as string;

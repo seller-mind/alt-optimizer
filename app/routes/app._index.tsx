@@ -25,25 +25,11 @@ import { getDashboardStats } from "~/services/sync.server";
 import { getCurrentUsage } from "~/services/billing.server";
 import prisma from "~/db.server";
 import { useState, useCallback } from "react";
+import { getOrCreateShop } from "~/utils/shop.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  // Auto-create shop record if missing (e.g., afterAuth did not create it)
-  if (!shop) {
-    shop = await prisma.shop.create({
-      data: {
-        shopDomain: session.shop,
-        accessToken: session.accessToken || "",
-        planType: "free",
-        status: "active",
-      },
-    });
-    console.log(`[AltOptimizer] Auto-created missing shop record for: ${session.shop}`);
-  }
+  const shop = await getOrCreateShop(session.shop);
 
   const [stats, usage] = await Promise.all([
     getDashboardStats(shop.id),

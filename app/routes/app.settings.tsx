@@ -21,16 +21,11 @@ import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { getCurrentUsage, getUsageHistory, deleteShopData } from "~/services/billing.server";
 import { PLANS } from "~/constants";
+import { getOrCreateShop } from "~/utils/shop.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  if (!shop) {
-    throw new Response("Shop not found", { status: 404 });
-  }
+  const shop = await getOrCreateShop(session.shop);
 
   const [usage, history] = await Promise.all([
     getCurrentUsage(shop.id),
@@ -53,13 +48,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const shop = await prisma.shop.findUnique({
-    where: { shopDomain: session.shop },
-  });
-
-  if (!shop) {
-    throw new Response("Shop not found", { status: 404 });
-  }
+  const shop = await getOrCreateShop(session.shop);
 
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
