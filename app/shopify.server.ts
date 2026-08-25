@@ -55,7 +55,6 @@ function getShopifyConfig() {
         const shop = session.shop;
         console.log(`[AltOptimizer] App installed for shop: ${shop}`);
         
-        // Create or update shop record in database
         try {
           const existingShop = await prisma.shop.findUnique({
             where: { shopDomain: shop },
@@ -108,9 +107,8 @@ function getShopifyConfig() {
         callbackUrl: "/webhooks",
       },
     },
-    future: {
-      unstable_newEmbeddedAuthStrategy: true,
-    },
+    // REMOVED: unstable_newEmbeddedAuthStrategy - was causing blank page in iframe
+    // The default cookie-based auth is stable and proven to work in embedded apps
   };
 }
 
