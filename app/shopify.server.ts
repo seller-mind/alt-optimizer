@@ -137,17 +137,26 @@ function getShopifySafe(): ReturnType<typeof shopifyApp> | null {
   }
 }
 
+const unconfiguredResponse = () =>
+  new Response("AltOptimizer: Shopify credentials not configured. Check environment variables.", {
+    status: 503,
+    headers: { "Content-Type": "text/plain" },
+  });
+
 const authenticate = {
   admin: (request: Request) => {
-    const shopify = getShopify();
+    const shopify = getShopifySafe();
+    if (!shopify) return unconfiguredResponse();
     return shopify.authenticate.admin(request);
   },
   webhook: (request: Request) => {
-    const shopify = getShopify();
+    const shopify = getShopifySafe();
+    if (!shopify) return unconfiguredResponse();
     return shopify.authenticate.webhook(request);
   },
   public: (request: Request) => {
-    const shopify = getShopify();
+    const shopify = getShopifySafe();
+    if (!shopify) return unconfiguredResponse();
     return shopify.authenticate.public(request);
   },
 };

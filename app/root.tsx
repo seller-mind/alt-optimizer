@@ -1,6 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData, useRouteError, isRouteErrorResponse } from "@remix-run/react";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError, isRouteErrorResponse, useLocation } from "@remix-run/react";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { Page, Card, Text, EmptyState, Button } from "@shopify/polaris";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
@@ -8,22 +6,19 @@ import en from "@shopify/polaris/locales/en.json";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  const shop = url.searchParams.get("shop") || "";
-  const apiKey = process.env.SHOPIFY_API_KEY || "";
-  const appUrl = process.env.SHOPIFY_APP_URL || "https://alt-optimizer.vercel.app";
-
-  // If no shop parameter, redirect to install page
-  if (!shop) {
-    return redirect(`${appUrl}/install?shop=haimo-dev.myshopify.com`, 302);
-  }
-
-  return { apiKey, shop };
-};
-
 export default function App() {
-  const { apiKey, shop } = useLoaderData<typeof loader>();
+  const location = useLocation();
+
+  // If there's a shop query param but we're not on a valid route,
+  // redirect to install to start OAuth
+  if (location.search.includes("shop=") && location.pathname === "/") {
+    const params = new URLSearchParams(location.search);
+    const shop = params.get("shop");
+    if (shop) {
+      window.location.href = `/install?shop=${shop}`;
+      return null;
+    }
+  }
 
   return (
     <html lang="en">
@@ -35,7 +30,7 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <AppProvider i18n={en} isEmbeddedApp apiKey={apiKey} shop={shop}>
+        <AppProvider i18n={en} isEmbeddedApp>
           <Outlet />
         </AppProvider>
         <ScrollRestoration />
@@ -73,7 +68,7 @@ export function ErrorBoundary() {
         <link rel="stylesheet" href={polarisStyles} />
       </head>
       <body>
-        <AppProvider i18n={en} isEmbeddedApp apiKey={process.env.SHOPIFY_API_KEY || ""}>
+        <AppProvider i18n={en} isEmbeddedApp>
           <Page>
             <Card>
               <EmptyState
