@@ -1,4 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
 import { Links, Meta, Outlet, Scripts, ScrollRestoration, useLoaderData, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { Page, Card, Text, EmptyState, Button } from "@shopify/polaris";
@@ -8,10 +9,16 @@ import en from "@shopify/polaris/locales/en.json";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // Provide Shopify API key for AppProvider
+  const url = new URL(request.url);
+  const shop = url.searchParams.get("shop") || "";
   const apiKey = process.env.SHOPIFY_API_KEY || "";
-  const shop = new URL(request.url).searchParams.get("shop") || "";
-  
+  const appUrl = process.env.SHOPIFY_APP_URL || "https://alt-optimizer.vercel.app";
+
+  // If no shop parameter, redirect to install page
+  if (!shop) {
+    return redirect(`${appUrl}/install?shop=haimo-dev.myshopify.com`, 302);
+  }
+
   return { apiKey, shop };
 };
 
