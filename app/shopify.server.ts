@@ -30,7 +30,7 @@ function getShopifyConfig() {
       "read_content",
       "write_content",
     ],
-    apiVersion: ApiVersion.October24,
+    apiVersion: ApiVersion.July25,
     isEmbeddedApp: true,
     appDistribution: AppDistribution.MultiTenant,
     appUrl,
