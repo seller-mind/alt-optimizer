@@ -19,7 +19,7 @@ import {
   Toast,
   Box,
 } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { syncProductsFromShopify } from "~/services/sync.server";
@@ -85,8 +85,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = formData.get("intent");
 
   if (intent === "sync") {
-    const result = await syncProductsFromShopify(shop.id, admin);
-    return json({ success: true, synced: result.synced });
+    try {
+      const result = await syncProductsFromShopify(shop.id, admin);
+      return json({ success: true, synced: result.synced });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      return json({ success: false, error: msg });
+    }
   }
 
   return json({ success: false });
@@ -102,13 +107,16 @@ export default function ProductsPage() {
   const [toastContent, setToastContent] = useState("");
 
   // Show toast when sync completes
-  if (actionData?.success && !toastActive) {
-    setToastContent(`✅ Synced ${actionData.synced} products from Shopify`);
-    setToastActive(true);
-  } else if (actionData?.error && !toastActive) {
-    setToastContent(` Sync failed: ${actionData.error}`);
-    setToastActive(true);
-  }
+  useEffect(() => {
+    if (!actionData) return;
+    if (actionData.success) {
+      setToastContent(`✅ Synced ${actionData.synced} products from Shopify`);
+      setToastActive(true);
+    } else if (actionData.error) {
+      setToastContent(`❌ Sync failed: ${actionData.error}`);
+      setToastActive(true);
+    }
+  }, [actionData]);
 
   const [selectedFilter, setSelectedFilter] = useState<string>(filter);
 
