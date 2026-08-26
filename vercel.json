@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx prisma generate && (npx prisma db push --accept-data-loss || echo 'DB push skipped') && pnpm run build",
-  "installCommand": "pnpm install --no-frozen-lockfile",
+  "buildCommand": "npx prisma generate && (npx prisma db push --accept-data-loss || echo 'DB push skipped') && npx remix vite:build",
+  "installCommand": "npm install --legacy-peer-deps",
   "framework": "remix"
 }
