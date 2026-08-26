@@ -95,11 +95,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function ProductsPage() {
   const { products, filter, totalProducts } = useLoaderData<typeof loader>();
+  const actionData = useActionData<{ success?: boolean; synced?: number; error?: string }>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isSyncing = navigation.state !== "idle" && navigation.formData?.get("intent") === "sync";
   const [toastActive, setToastActive] = useState(false);
   const [toastContent, setToastContent] = useState("");
+
+  // Show toast when sync completes
+  if (actionData?.success && !toastActive) {
+    setToastContent(`✅ Synced ${actionData.synced} products from Shopify`);
+    setToastActive(true);
+  } else if (actionData?.error && !toastActive) {
+    setToastContent(` Sync failed: ${actionData.error}`);
+    setToastActive(true);
+  }
 
   const [selectedFilter, setSelectedFilter] = useState<string>(filter);
 
