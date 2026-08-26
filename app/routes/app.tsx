@@ -1,19 +1,17 @@
 import { Outlet, useRouteError } from "@remix-run/react";
 import { Box, InlineStack, Text } from "@shopify/polaris";
-import { Boundary } from "~/components/Boundary";
-import { AppNav } from "~/components/AppNav";
+import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { boundary } from "@shopify/shopify-app-remix/server";
 import shopify from "~/shopify.server";
-import type { LoaderFunctionArgs } from "@remix-run/node";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await shopify.authenticate.admin(request);
-  return null;
+  return json(null);
 };
 
 export default function AppLayout() {
   return (
     <Box minHeight="100vh" display="flex" flexDirection="column">
-      <AppNav />
       <Box flex={1}>
         <Outlet />
       </Box>
@@ -35,6 +33,9 @@ export default function AppLayout() {
 }
 
 export function ErrorBoundary() {
-  const error = useRouteError();
-  return <Boundary error={error} />;
+  return boundary.error(useRouteError());
 }
+
+export const headers = (headersArgs: { actionHeaders: Headers }) => {
+  return boundary.headers(headersArgs);
+};

@@ -4,6 +4,7 @@ import { createReadableStreamFromReadable } from "@remix-run/node";
 import { RemixServer } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToPipeableStream } from "react-dom/server";
+import shopify from "./shopify.server";
 
 export const streamTimeout = 5_000;
 
@@ -14,6 +15,9 @@ export default function handleRequest(
   remixContext: EntryContext,
   _loadContext: AppLoadContext
 ) {
+  // CRITICAL: Add CSP headers for Shopify Admin iframe embedding
+  shopify.addDocumentResponseHeaders(request, responseHeaders);
+
   return isbot(request.headers.get("user-agent") || "")
     ? handleBotRequest(request, responseStatusCode, responseHeaders, remixContext)
     : handleBrowserRequest(request, responseStatusCode, responseHeaders, remixContext);
