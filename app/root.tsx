@@ -9,6 +9,7 @@ import {
 } from "@remix-run/react";
 import { json } from "@remix-run/node";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
+import { Frame } from "@shopify/polaris";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import en from "@shopify/polaris/locales/en.json";
 
@@ -60,7 +61,9 @@ export default function App() {
       </head>
       <body>
         <AppProvider i18n={en} apiKey={apiKey} isEmbeddedApp={true}>
-          {content}
+          <Frame>
+            {content}
+          </Frame>
         </AppProvider>
         <ScrollRestoration />
         <Scripts />
