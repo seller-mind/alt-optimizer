@@ -31,7 +31,7 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <AppProvider i18n={en} apiKey={process.env.SHOPIFY_API_KEY || ""} isEmbeddedApp>
+        <AppProvider i18n={en} apiKey={process.env.SHOPIFY_API_KEY || ""} isEmbeddedApp={false}>
           <Outlet />
         </AppProvider>
         <ScrollRestoration />
@@ -70,7 +70,7 @@ export function ErrorBoundary() {
         <link rel="stylesheet" href={polarisStyles} />
       </head>
       <body>
-        <AppProvider i18n={en} apiKey={process.env.SHOPIFY_API_KEY || ""} isEmbeddedApp>
+        <AppProvider i18n={en} apiKey={process.env.SHOPIFY_API_KEY || ""} isEmbeddedApp={false}>
           <div style={{ padding: 40, textAlign: "center" }}>
             <h2>{title}</h2>
             <p>{description}</p>
