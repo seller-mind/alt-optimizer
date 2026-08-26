@@ -3,12 +3,12 @@ import { redirect } from "@remix-run/node";
 import shopify from "~/shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // Handle OAuth callback code exchange, then redirect to /app
   const { session } = await shopify.authenticate.admin(request);
+  const appUrl = process.env.SHOPIFY_APP_URL || "https://localhost:3000";
   if (session) {
-    return redirect("/app");
+    return redirect(`${appUrl}/app`);
   }
-  return redirect("/auth");
+  return redirect(`${appUrl}/auth`);
 };
 
 export default function AuthExitIframe() {
