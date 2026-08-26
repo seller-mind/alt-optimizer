@@ -58,7 +58,7 @@ export default function InstallPage() {
         <div style={{ marginBottom: 32 }}>
           <a
             href={installUrl}
-            target="_blank"
+            target="_top"
             rel="noopener noreferrer"
             style={{
               display: "inline-block",
@@ -74,9 +74,15 @@ export default function InstallPage() {
             Install AltOptimizer →
           </a>
           <p style={{ color: "#666", fontSize: 13, marginTop: 12 }}>
-            ️ This opens in a <strong>new tab</strong> to complete OAuth outside the iframe.
+            This will redirect to Shopify to authorize the app.
             After approving permissions, you'll be redirected back to the dashboard.
           </p>
+          <details style={{ marginTop: 16 }}>
+            <summary style={{ cursor: "pointer", color: "#999", fontSize: 12 }}>Debug: OAuth URL</summary>
+            <pre style={{ fontSize: 11, color: "#666", wordBreak: "break-all", whiteSpace: "pre-wrap", marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 4 }}>
+              {installUrl}
+            </pre>
+          </details>
         </div>
       )}
 

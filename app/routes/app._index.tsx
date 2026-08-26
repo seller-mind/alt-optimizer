@@ -17,10 +17,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   let shopDomain = url.searchParams.get("shop") || "";
 
-  // Bypass library auth - read directly from Shop table
-  // The OAuth callback (auth.callback.tsx) stores the shop + accessToken in the DB
+  // Fallback: read shop from cookie (set by auth callback after OAuth success)
   if (!shopDomain) {
-    console.log("[AltOptimizer] No shop param, redirecting to install");
+    const cookieHeader = request.headers.get("Cookie") || "";
+    const shopCookie = cookieHeader
+      .split(";")
+      .map((c) => c.trim())
+      .find((c) => c.startsWith("shop_domain="));
+    if (shopCookie) {
+      shopDomain = decodeURIComponent(shopCookie.split("=")[1]);
+      console.log("[AltOptimizer] Got shop from cookie:", shopDomain);
+    }
+  }
+
+  console.log("[AltOptimizer] app._index loader - shopDomain:", shopDomain, "url:", request.url);
+
+  if (!shopDomain) {
+    console.log("[AltOptimizer] No shop param or cookie, redirecting to install");
     return redirect("/install");
   }
 
@@ -29,6 +42,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shop = await prisma.shop.findUnique({
       where: { shopDomain },
     });
+    console.log("[AltOptimizer] Shop lookup result:", shop ? `found (hasToken: ${!!shop?.accessToken})` : "NOT FOUND");
   } catch (e) {
     console.error("[AltOptimizer] Shop lookup failed:", e);
   }
