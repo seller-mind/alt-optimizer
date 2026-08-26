@@ -17,7 +17,6 @@ import {
   SkeletonBodyText,
   Banner,
   Toast,
-  Frame,
   Box,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
@@ -214,9 +213,8 @@ export default function ProductsPage() {
         </Button>
       }
     >
-      <Frame>
-        {toastMarkup}
-        <Layout>
+      {toastMarkup}
+      <Layout>
           <Layout.Section>
             <Card>
               <BlockStack gap="400">
@@ -357,7 +355,6 @@ export default function ProductsPage() {
             </Card>
           </Layout.Section>
         </Layout>
-      </Frame>
     </Page>
   );
 }
