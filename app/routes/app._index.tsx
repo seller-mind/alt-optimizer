@@ -14,23 +14,31 @@ import { useState, useCallback } from "react";
 import { getOrCreateShop } from "~/utils/shop.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  let authResult;
+  const url = new URL(request.url);
+  let shopDomain = url.searchParams.get("shop") || "";
+
+  // Bypass library auth - read directly from Shop table
+  // The OAuth callback (auth.callback.tsx) stores the shop + accessToken in the DB
+  if (!shopDomain) {
+    console.log("[AltOptimizer] No shop param, redirecting to install");
+    return redirect("/install");
+  }
+
+  let shop;
   try {
-    authResult = await authenticate.admin(request);
-  } catch (error) {
-    // Auth failed - redirect to install page
-    console.log("[AltOptimizer] Auth failed, redirecting to install:", error);
+    shop = await prisma.shop.findUnique({
+      where: { shopDomain },
+    });
+  } catch (e) {
+    console.error("[AltOptimizer] Shop lookup failed:", e);
+  }
+
+  if (!shop || !shop.accessToken) {
+    console.log("[AltOptimizer] Shop not found or no access token for:", shopDomain);
     return redirect("/install");
   }
 
-  // If authenticate returned a Response (OAuth redirect), redirect to install instead
-  if (authResult instanceof Response) {
-    console.log("[AltOptimizer] No session, redirecting to install");
-    return redirect("/install");
-  }
-
-  const { session } = authResult;
-  const shop = await getOrCreateShop(session.shop);
+  console.log("[AltOptimizer] Auth OK for shop:", shopDomain);
 
   let stats, usage;
   try {
@@ -56,7 +64,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     stats, usage,
-    shopDomain: session.shop,
+    shopDomain: shop.shopDomain,
     planType: shop.planType,
     showOnboarding,
     onboardingStep: shop.onboardingStep || "welcome",
