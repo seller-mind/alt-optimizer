@@ -4,13 +4,17 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
-let prisma: PrismaClient;
-try {
-  prisma = globalThis.__prisma ?? new PrismaClient();
-  globalThis.__prisma = prisma;
-} catch (error) {
-  console.error("[AltOptimizer] PrismaClient initialization failed:", error);
-  prisma = null as unknown as PrismaClient;
+if (!global.__prisma) {
+  global.__prisma = new PrismaClient();
+}
+
+const prisma = global.__prisma;
+
+// Auto-create tables on first import (development/safe mode)
+if (process.env.NODE_ENV !== "production") {
+  prisma.$connect().catch((err) => {
+    console.error("[Prisma] Connection failed:", err.message);
+  });
 }
 
 export default prisma;

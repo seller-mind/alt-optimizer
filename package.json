@@ -2,6 +2,9 @@
   "name": "alt-optimizer",
   "version": "1.0.0",
   "private": true,
+  "sideEffects": false,
+  "packageManager": "pnpm@10.30.3",
+  "type": "module",
   "scripts": {
     "build": "prisma generate && prisma db push --accept-data-loss && remix vite:build",
     "dev": "prisma generate && remix vite:dev",
@@ -9,27 +12,35 @@
     "generate": "prisma generate",
     "push": "prisma db push",
     "studio": "prisma studio",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "postinstall": "prisma generate",
     "vercel-build": "prisma generate && prisma db push --accept-data-loss && remix vite:build"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "@remix-run/node": "^2.15.3",
-    "@remix-run/react": "^2.15.3",
-    "@remix-run/serve": "^2.15.3",
+    "@remix-run/node": "^2.15.0",
+    "@remix-run/react": "^2.15.0",
+    "@remix-run/serve": "^2.15.0",
     "@shopify/polaris": "^12.0.0",
-    "@shopify/shopify-app-remix": "^3.8.5",
-    "@shopify/shopify-app-session-storage-prisma": "^4.0.5",
-    "isbot": "^5.1.17",
+    "@shopify/polaris-icons": "^9.3.1",
+    "@shopify/shopify-api": "^11.7.0",
+    "@shopify/shopify-app-remix": "^3.6.0",
+    "@shopify/shopify-app-session-storage-prisma": "^4.0.0",
+    "isbot": "^5.1.0",
+    "openai": "^7.5.0",
     "prisma": "^5.22.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "vite-tsconfig-paths": "^4.3.0"
   },
   "devDependencies": {
-    "@remix-run/dev": "^2.15.3",
+    "@remix-run/dev": "^2.15.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "typescript": "^5.7.0",
+    "vite": "^5.4.0",
+    "prisma": "^5.22.0"
   },
   "engines": {
     "node": ">=20.0.0"
