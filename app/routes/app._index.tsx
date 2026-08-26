@@ -110,14 +110,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function DashboardIndex() {
   const {
-    stats, usage, shopDomain, planType, showOnboarding, onboardingStep,
+    stats, usage, shopDomain, planType, showOnboarding, onboardingStep: initialStep,
     needsReview, hasAiGenerated, imagesWithoutAlt,
   } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const submit = useSubmit();
   const navigation = useNavigation();
   const [onboardingOpen, setOnboardingOpen] = useState(showOnboarding);
-  const [onboardingStep, setOnboardingStepState] = useState(onboardingStep);
+  const [onboardingStep, setOnboardingStepState] = useState(initialStep || "welcome");
 
   const quotaWarning = usage.percentage >= 80;
   const quotaCritical = usage.percentage >= 95;
