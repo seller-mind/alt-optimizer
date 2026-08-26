@@ -1,12 +1,13 @@
 import { Outlet, useRouteError } from "@remix-run/react";
-import { Box, InlineStack, Text, Card, BlockStack, Button } from "@shopify/polaris";
+import { Box, InlineStack, Text } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-remix/server";
-import { useActionData } from "@remix-run/react";
+import { AppNav } from "~/components/AppNav";
 
 export default function AppLayout() {
   return (
     <Box minHeight="100vh" display="flex" flexDirection="column">
-      <Box flex={1}>
+      <AppNav />
+      <Box flex={1} padding="400">
         <Outlet />
       </Box>
       <Box
@@ -14,12 +15,10 @@ export default function AppLayout() {
         borderBlockStart="025"
         background="bg-surface-secondary"
       >
-        <InlineStack align="space-between" blockAlign="center" wrap={false}>
-          <InlineStack gap="400" wrap={false}>
-            <Text as="p" variant="bodySm" tone="subdued">
-              AltOptimizer v1.0.0
-            </Text>
-          </InlineStack>
+        <InlineStack align="center" blockAlign="center">
+          <Text as="p" variant="bodySm" tone="subdued">
+            AltOptimizer v1.0.0
+          </Text>
         </InlineStack>
       </Box>
     </Box>
