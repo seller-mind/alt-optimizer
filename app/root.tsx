@@ -32,7 +32,7 @@ export default function App() {
         <Links />
       </head>
       <body>
-        <AppProvider i18n={en} apiKey={apiKey} isEmbeddedApp={false}>
+        <AppProvider i18n={en} apiKey={apiKey} isEmbeddedApp={true}>
           <Outlet />
         </AppProvider>
         <ScrollRestoration />
