@@ -117,6 +117,7 @@ export default function DashboardIndex() {
   const submit = useSubmit();
   const navigation = useNavigation();
   const [onboardingOpen, setOnboardingOpen] = useState(showOnboarding);
+  const [onboardingStep, setOnboardingStepState] = useState(onboardingStep);
 
   const quotaWarning = usage.percentage >= 80;
   const quotaCritical = usage.percentage >= 95;
@@ -124,17 +125,11 @@ export default function DashboardIndex() {
 
   const dismissOnboarding = useCallback(() => {
     setOnboardingOpen(false);
-    const formData = new FormData();
-    formData.set("intent", "dismiss_onboarding");
-    submit(formData, { method: "post" });
-  }, [submit]);
+  }, []);
 
   const advanceOnboarding = useCallback((step: string) => {
-    const formData = new FormData();
-    formData.set("intent", "advance_onboarding");
-    formData.set("step", step);
-    submit(formData, { method: "post" });
-  }, [submit]);
+    setOnboardingStepState(step);
+  }, []);
 
   const onboardingModal = (
     <Modal open={onboardingOpen} onClose={dismissOnboarding} title="" large titleHidden>
