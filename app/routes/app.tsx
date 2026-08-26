@@ -2,11 +2,11 @@ import { Outlet, useRouteError } from "@remix-run/react";
 import { Box, InlineStack, Text } from "@shopify/polaris";
 import { Boundary } from "~/components/Boundary";
 import { AppNav } from "~/components/AppNav";
-import { authenticate } from "~/shopify.server";
+import shopify from "~/shopify.server";
 import type { LoaderFunctionArgs } from "@remix-run/node";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  await shopify.authenticate.admin(request);
   return null;
 };
 
