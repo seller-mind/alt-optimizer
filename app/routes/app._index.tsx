@@ -7,92 +7,34 @@ import {
 } from "@shopify/polaris";
 import { CheckCircleIcon, AlertTriangleIcon } from "@shopify/polaris-icons";
 import { useState, useCallback } from "react";
-
-// --- Session helpers (JWT-first, no cross-site cookies) ---
-
-function getCookie(req: Request, name: string): string | null {
-  const cookieHeader = req.headers.get("Cookie") || "";
-  const match = cookieHeader
-    .split(";")
-    .map((c) => c.trim())
-    .find((c) => c.startsWith(`${name}=`));
-  return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : null;
-}
-
-/**
- * Extract shop domain from Shopify App Bridge JWT token.
- * Every embedded app request includes Authorization: Bearer <jwt>
- * JWT payload contains: { dest: "https://SHOP.myshopify.com", iss, sub, ... }
- */
-function getShopFromJWT(request: Request): string | null {
-  const authHeader = request.headers.get("Authorization") || "";
-  if (!authHeader.startsWith("Bearer ")) return null;
-
-  const token = authHeader.slice("Bearer ".length);
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-    // Decode payload (second part, base64url) without verification
-    const payload = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf-8")
-    );
-    // dest is like "https://haimo-dev.myshopify.com"
-    const dest: string = payload.dest || "";
-    const match = dest.match(/https:\/\/([^.]+\.myshopify\.com)/);
-    return match ? match[1] : null;
-  } catch {
-    return null;
-  }
-}
+import { authenticate } from "~/shopify.server";
+import prisma from "~/db.server";
+import { getOrCreateShop } from "~/utils/shop.server";
+import { getDashboardStats } from "~/services/sync.server";
+import { getCurrentUsage } from "~/services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const url = new URL(request.url);
-  let shopDomain = url.searchParams.get("shop") || "";
+  const { session } = await authenticate.admin(request);
+  const shop = await getOrCreateShop(session.shop);
 
-  // Priority 1: JWT from App Bridge (always present in embedded iframe)
-  if (!shopDomain) {
-    shopDomain = getShopFromJWT(request) || "";
-    if (shopDomain) {
-      console.log("[AltOptimizer] Shop from JWT:", shopDomain);
-    }
-  }
+  const [stats, usage] = await Promise.all([
+    getDashboardStats(shop.id),
+    getCurrentUsage(shop.id),
+  ]);
 
-  // Priority 2: Cookie fallback (for non-embedded access)
-  if (!shopDomain) {
-    const cookieShop = getCookie(request, "altopt_shop");
-    if (cookieShop) {
-      shopDomain = cookieShop;
-      console.log("[AltOptimizer] Shop from cookie:", shopDomain);
-    }
-  }
-
-  console.log("[AltOptimizer] app._index loader - shopDomain:", shopDomain, "url:", request.url);
-
-  if (!shopDomain) {
-    console.log("[AltOptimizer] No shop found (no JWT, no cookie, no URL param), redirecting to install");
-    return redirect("/install");
-  }
-
-  // For now, show dashboard with default stats (no DB, no API calls yet)
-  const stats = {
-    totalProducts: 0, totalImages: 0, imagesWithAlt: 0,
-    imagesWithAi: 0, imagesPending: 0, totalGenerated: 0, totalApiCalls: 0,
-  };
-  const usage = {
-    imagesGenerated: 0, tagsGenerated: 0, jsonLdGenerated: 0,
-    apiCalls: 0, quota: 50, percentage: 0, planName: "Free",
-    planType: "free", remaining: 50,
-  };
+  const totalImages = stats.totalImages;
+  const imagesWithoutAlt = totalImages - stats.imagesWithAlt;
 
   return {
-    stats, usage,
-    shopDomain,
-    planType: "free",
-    showOnboarding: true,
+    stats,
+    usage,
+    shopDomain: session.shop,
+    planType: shop.planType,
+    showOnboarding: stats.totalProducts === 0,
     onboardingStep: "welcome",
-    needsReview: false,
-    hasAiGenerated: false,
-    imagesWithoutAlt: 0,
+    needsReview: stats.imagesPending > 0,
+    hasAiGenerated: stats.imagesWithAi > 0,
+    imagesWithoutAlt,
   };
 };
 
