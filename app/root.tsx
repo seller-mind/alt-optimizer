@@ -5,6 +5,7 @@ import {
   Scripts,
   ScrollRestoration,
   useLoaderData,
+  useLocation,
 } from "@remix-run/react";
 import { json } from "@remix-run/node";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
@@ -19,8 +20,34 @@ export const loader = async () => {
   });
 };
 
+// Routes that should NOT be wrapped by App Bridge
+const STANDALONE_ROUTES = ["/install", "/auth", "/privacy", "/terms", "/healthcheck"];
+
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
+  const { pathname } = useLocation();
+  const isStandalone = STANDALONE_ROUTES.some(route => pathname.startsWith(route));
+
+  const content = <Outlet />;
+
+  if (isStandalone) {
+    return (
+      <html lang="en">
+        <head>
+          <meta charSet="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>AltOptimizer - AI Product Optimizer</title>
+          <Meta />
+          <Links />
+        </head>
+        <body>
+          {content}
+          <ScrollRestoration />
+          <Scripts />
+        </body>
+      </html>
+    );
+  }
 
   return (
     <html lang="en">
@@ -33,7 +60,7 @@ export default function App() {
       </head>
       <body>
         <AppProvider i18n={en} apiKey={apiKey} isEmbeddedApp={true}>
-          <Outlet />
+          {content}
         </AppProvider>
         <ScrollRestoration />
         <Scripts />

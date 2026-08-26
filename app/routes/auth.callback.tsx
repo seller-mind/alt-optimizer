@@ -116,18 +116,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   console.log("[AltOptimizer][auth/callback] Cookie size:", cookieValue.length, "bytes");
   console.log("[AltOptimizer][auth/callback] === SUCCESS, redirecting to /app");
 
-  // Set multiple cookies for easy access
-  const cookies = [
-    `altopt_shop=${encodeURIComponent(shop)}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure`,
-    `altopt_token=${cookieValue}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure; HttpOnly`,
-  ];
+  // Set multiple cookies (must use separate Set-Cookie headers)
+  const headers = new Headers();
+  headers.append("Set-Cookie", `altopt_shop=${encodeURIComponent(shop)}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure`);
+  headers.append("Set-Cookie", `altopt_token=${cookieValue}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure; HttpOnly`);
+  headers.set("Location", `/app?shop=${shop}`);
 
   return new Response(null, {
     status: 302,
-    headers: {
-      Location: `/app?shop=${shop}`,
-      "Set-Cookie": cookies.join(", "),
-    },
+    headers,
   });
 }
 
