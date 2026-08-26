@@ -56,23 +56,22 @@ export default function InstallPage() {
 
       {shop && installUrl && (
         <div style={{ marginBottom: 32 }}>
-          <a
-            href={installUrl}
-            target="_top"
-            rel="noopener noreferrer"
+          <button
+            onClick={() => { window.top.location.href = installUrl; }}
             style={{
               display: "inline-block",
               background: "#008060",
               color: "white",
               padding: "12px 24px",
               borderRadius: 8,
-              textDecoration: "none",
+              border: "none",
               fontWeight: 600,
               fontSize: 16,
+              cursor: "pointer",
             }}
           >
             Install AltOptimizer →
-          </a>
+          </button>
           <p style={{ color: "#666", fontSize: 13, marginTop: 12 }}>
             This will redirect to Shopify to authorize the app.
             After approving permissions, you'll be redirected back to the dashboard.
