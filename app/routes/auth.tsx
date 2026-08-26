@@ -1,7 +1,36 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
+import { redirect } from "@remix-run/node";
+import shopify from "~/shopify.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  // No SDK calls - just render the install form
+  const url = new URL(request.url);
+  const shop = url.searchParams.get("shop");
+
+  if (shop) {
+    // SDK detected shop param - initiate OAuth directly
+    // Build Shopify OAuth URL manually since SDK redirects back to /auth
+    const apiKey = process.env.SHOPIFY_API_KEY || "";
+    const appUrl = process.env.SHOPIFY_APP_URL || "https://alt-optimizer.vercel.app";
+    const scopes = "read_products,write_products,read_themes,write_themes,read_content,write_content";
+    const state = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+    // Normalize shop domain
+    let shopDomain = shop.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    if (!shopDomain.endsWith(".myshopify.com")) {
+      shopDomain = `${shopDomain}.myshopify.com`;
+    }
+
+    const oauthUrl = `https://${shopDomain}/admin/oauth/authorize` +
+      `?client_id=${encodeURIComponent(apiKey)}` +
+      `&scope=${encodeURIComponent(scopes)}` +
+      `&redirect_uri=${encodeURIComponent(`${appUrl}/auth/callback`)}` +
+      `&state=${encodeURIComponent(state)}`;
+
+    console.log("[AltOptimizer] Initiating OAuth redirect to:", oauthUrl);
+    throw redirect(oauthUrl);
+  }
+
+  // No shop param - render install form
   return null;
 };
 
