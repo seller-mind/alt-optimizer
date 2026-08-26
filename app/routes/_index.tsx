@@ -8,7 +8,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { shop: session?.shop || "unknown" };
 };
 
-export default function DashboardIndex() {
+export default function Index() {
   const { shop } = useLoaderData<typeof loader>();
 
   return (
@@ -22,12 +22,8 @@ export default function DashboardIndex() {
               </Text>
               <Banner title="App loaded successfully" tone="success">
                 <BlockStack gap="200">
-                  <Text as="p">
-                    Connected to shop: {shop}
-                  </Text>
-                  <Text as="p">
-                    If you can see this message, the app is working correctly.
-                  </Text>
+                  <Text as="p">Connected to: {shop}</Text>
+                  <Text as="p">The app is working correctly.</Text>
                 </BlockStack>
               </Banner>
             </BlockStack>
