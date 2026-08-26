@@ -6,107 +6,121 @@ import {
   Badge, ProgressBar, Banner, Button, ButtonGroup, Box, EmptyState, List, Modal, Icon,
 } from "@shopify/polaris";
 import { CheckCircleIcon, AlertTriangleIcon } from "@shopify/polaris-icons";
-import { authenticate } from "~/shopify.server";
-import { getDashboardStats } from "~/services/sync.server";
-import { getCurrentUsage } from "~/services/billing.server";
-import prisma from "~/db.server";
 import { useState, useCallback } from "react";
-import { getOrCreateShop } from "~/utils/shop.server";
+
+// --- Cookie session helpers (no DB dependency) ---
+function getCookie(req: Request, name: string): string | null {
+  const cookieHeader = req.headers.get("Cookie") || "";
+  const match = cookieHeader
+    .split(";")
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : null;
+}
+
+async function verifySession(req: Request): Promise<{ shop: string; accessToken: string; scope: string } | null> {
+  // Try reading the signed token cookie first
+  const tokenCookie = getCookie(req, "altopt_token");
+  const shopCookie = getCookie(req, "altopt_shop");
+  const SESSION_SECRET = process.env.SESSION_SECRET || "alt-optimizer-dev-secret-change-me";
+
+  if (tokenCookie) {
+    try {
+      // Verify signature
+      const lastDot = tokenCookie.lastIndexOf(".");
+      const payload = tokenCookie.slice(0, lastDot);
+      const signature = tokenCookie.slice(lastDot + 1);
+
+      const crypto = await import("crypto");
+      const expectedSig = crypto
+        .createHmac("sha256", SESSION_SECRET)
+        .update(payload)
+        .digest("hex");
+
+      if (expectedSig !== signature) {
+        console.log("[AltOptimizer] Cookie signature mismatch");
+        return null;
+      }
+
+      const data = JSON.parse(Buffer.from(payload, "base64url").toString());
+      if (data.expires && data.expires < Date.now()) {
+        console.log("[AltOptimizer] Session expired");
+        return null;
+      }
+      console.log("[AltOptimizer] Cookie session OK for:", data.shop);
+      return { shop: data.shop, accessToken: data.accessToken, scope: data.scope };
+    } catch (e) {
+      console.error("[AltOptimizer] Cookie parse error:", e);
+    }
+  }
+
+  // Fallback: just use the shop cookie without token (limited access)
+  if (shopCookie) {
+    console.log("[AltOptimizer] Using shop-only cookie (no token) for:", shopCookie);
+    return { shop: shopCookie, accessToken: "", scope: "" };
+  }
+
+  return null;
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   let shopDomain = url.searchParams.get("shop") || "";
 
-  // Fallback: read shop from cookie (set by auth callback after OAuth success)
-  if (!shopDomain) {
-    const cookieHeader = request.headers.get("Cookie") || "";
-    const shopCookie = cookieHeader
-      .split(";")
-      .map((c) => c.trim())
-      .find((c) => c.startsWith("shop_domain="));
-    if (shopCookie) {
-      shopDomain = decodeURIComponent(shopCookie.split("=")[1]);
-      console.log("[AltOptimizer] Got shop from cookie:", shopDomain);
-    }
+  // Try cookie-based session
+  const session = await verifySession(request);
+
+  if (!shopDomain && session) {
+    shopDomain = session.shop;
   }
 
-  console.log("[AltOptimizer] app._index loader - shopDomain:", shopDomain, "url:", request.url);
+  console.log("[AltOptimizer] app._index loader - shopDomain:", shopDomain, "hasSession:", !!session, "url:", request.url);
 
   if (!shopDomain) {
-    console.log("[AltOptimizer] No shop param or cookie, redirecting to install");
+    console.log("[AltOptimizer] No shop param or session cookie, redirecting to install");
     return redirect("/install");
   }
 
-  let shop;
-  try {
-    shop = await prisma.shop.findUnique({
-      where: { shopDomain },
-    });
-    console.log("[AltOptimizer] Shop lookup result:", shop ? `found (hasToken: ${!!shop?.accessToken})` : "NOT FOUND");
-  } catch (e) {
-    console.error("[AltOptimizer] Shop lookup failed:", e);
-  }
-
-  if (!shop || !shop.accessToken) {
-    console.log("[AltOptimizer] Shop not found or no access token for:", shopDomain);
+  const accessToken = session?.accessToken || "";
+  if (!accessToken) {
+    console.log("[AltOptimizer] No access token for:", shopDomain, "- redirecting to install");
     return redirect("/install");
   }
 
-  console.log("[AltOptimizer] Auth OK for shop:", shopDomain);
+  console.log("[AltOptimizer] Auth OK for shop:", shopDomain, "token:", accessToken.slice(0, 10));
 
-  let stats, usage;
-  try {
-    [stats, usage] = await Promise.all([
-      getDashboardStats(shop.id),
-      getCurrentUsage(shop.id),
-    ]);
-  } catch (dbError) {
-    console.error("[AltOptimizer] DB query failed, using defaults:", dbError);
-    stats = {
-      totalProducts: 0, totalImages: 0, imagesWithAlt: 0,
-      imagesWithAi: 0, imagesPending: 0, totalGenerated: 0, totalApiCalls: 0,
-    };
-    usage = {
-      imagesGenerated: 0, tagsGenerated: 0, jsonLdGenerated: 0,
-      apiCalls: 0, quota: 50, percentage: 0, planName: "Free",
-      planType: "free", remaining: 50,
-    };
-  }
+  // Use default stats (no DB dependency)
+  const stats = {
+    totalProducts: 0, totalImages: 0, imagesWithAlt: 0,
+    imagesWithAi: 0, imagesPending: 0, totalGenerated: 0, totalApiCalls: 0,
+  };
+  const usage = {
+    imagesGenerated: 0, tagsGenerated: 0, jsonLdGenerated: 0,
+    apiCalls: 0, quota: 50, percentage: 0, planName: "Free",
+    planType: "free", remaining: 50,
+  };
 
-  const isNewUser = stats.totalProducts === 0;
-  const showOnboarding = isNewUser || shop.onboardingStep !== "completed";
+  const isNewUser = true;
+  const showOnboarding = true;
 
   return {
     stats, usage,
-    shopDomain: shop.shopDomain,
-    planType: shop.planType,
+    shopDomain,
+    planType: "free",
     showOnboarding,
-    onboardingStep: shop.onboardingStep || "welcome",
-    needsReview: stats.imagesPending > 0,
-    hasAiGenerated: stats.imagesWithAi > 0,
-    imagesWithoutAlt: stats.totalImages - stats.imagesWithAlt,
+    onboardingStep: "welcome",
+    needsReview: false,
+    hasAiGenerated: false,
+    imagesWithoutAlt: 0,
   };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  if (intent === "dismiss_onboarding") {
-    await prisma.shop.update({
-      where: { shopDomain: session.shop },
-      data: { onboardingStep: "completed" },
-    });
-    return json({ success: true });
-  }
-
-  if (intent === "advance_onboarding") {
-    const step = String(formData.get("step") || "welcome");
-    await prisma.shop.update({
-      where: { shopDomain: session.shop },
-      data: { onboardingStep: step },
-    });
+  // All onboarding state is client-side for now (no DB)
+  if (intent === "dismiss_onboarding" || intent === "advance_onboarding") {
     return json({ success: true });
   }
 

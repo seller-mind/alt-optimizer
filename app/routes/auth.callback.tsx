@@ -1,13 +1,22 @@
 import { LoaderFunctionArgs } from "@remix-run/node";
-import prisma from "~/db.server";
 
 const APP_URL = process.env.SHOPIFY_APP_URL || "https://alt-optimizer.vercel.app";
 const CLIENT_ID = process.env.SHOPIFY_API_KEY || "bf1b9b6eef0ca0ed0584705f23681ddd";
 const CLIENT_SECRET = process.env.SHOPIFY_API_SECRET || "";
+const SESSION_SECRET = process.env.SESSION_SECRET || "alt-optimizer-dev-secret-change-me";
 
 function redirectWithLog(url: string, reason: string) {
   console.error(`[AltOptimizer][auth/callback] REDIRECT → ${url} | ${reason}`);
   return new Response(null, { status: 302, headers: { Location: url } });
+}
+
+async function signPayload(payload: string): Promise<string> {
+  const crypto = await import("crypto");
+  const signature = crypto
+    .createHmac("sha256", SESSION_SECRET)
+    .update(payload)
+    .digest("hex");
+  return `${payload}.${signature}`;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -21,9 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   console.log("[AltOptimizer][auth/callback] shop:", shop);
   console.log("[AltOptimizer][auth/callback] hasCode:", !!code, "code:", code?.slice(0, 10));
   console.log("[AltOptimizer][auth/callback] hasHmac:", !!hmac);
-  console.log("[AltOptimizer][auth/callback] state:", state);
   console.log("[AltOptimizer][auth/callback] hasClientSecret:", !!CLIENT_SECRET);
-  console.log("[AltOptimizer][auth/callback] full URL:", request.url.replace(/[?].*/, "?***"));
 
   if (!code || !shop) {
     return redirectWithLog("/install", `Missing code=${!!code} or shop=${!!shop}`);
@@ -44,21 +51,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       .digest("hex");
 
     if (generatedHmac !== hmac) {
-      console.error("[AltOptimizer][auth/callback] HMAC mismatch!");
+      console.error("[AltOptimizer][auth/callback] HMAC MISMATCH!");
       console.error("[AltOptimizer][auth/callback] expected:", generatedHmac);
       console.error("[AltOptimizer][auth/callback] got:     ", hmac);
       return redirectWithLog("/install", "HMAC validation FAILED");
     }
     console.log("[AltOptimizer][auth/callback] HMAC OK");
   } else {
-    console.log("[AltOptimizer][auth/callback] HMAC skipped (secret:", !!CLIENT_SECRET, "hmac:", !!hmac, ")");
+    console.log("[AltOptimizer][auth/callback] HMAC skipped");
   }
 
   // --- Exchange code for access token ---
   console.log("[AltOptimizer][auth/callback] Exchanging code for token...");
   console.log("[AltOptimizer][auth/callback] POST https://", shop, "/admin/oauth/access_token");
-  console.log("[AltOptimizer][auth/callback] client_id:", CLIENT_ID);
-  console.log("[AltOptimizer][auth/callback] has client_secret:", !!CLIENT_SECRET);
 
   let tokenResponse;
   try {
@@ -90,72 +95,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const scope = tokenData.scope;
 
   console.log("[AltOptimizer][auth/callback] Token exchange SUCCESS, scope:", scope);
-  console.log("[AltOptimizer][auth/callback] accessToken prefix:", accessToken?.slice(0, 10));
 
-  // --- Store session in database ---
-  const sessionId = `offline_${shop}`;
+  // --- Store session in signed cookie ---
+  // Format: base64(json({shop, accessToken, scope, expires}))
+  const sessionData = {
+    shop,
+    accessToken,
+    scope: scope || "read_products,write_products,read_themes,write_themes,read_content,write_content",
+    expires: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
+  };
 
-  try {
-    await prisma.session.upsert({
-      where: { id: sessionId },
-      update: {
-        accessToken,
-        scope: scope || "read_products,write_products,read_themes,write_themes,read_content,write_content",
-        state: "online",
-        isOnline: false,
-      },
-      create: {
-        id: sessionId,
-        shop,
-        state: "online",
-        isOnline: false,
-        scope: scope || "read_products,write_products,read_themes,write_themes,read_content,write_content",
-        accessToken,
-        expires: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-      },
-    });
-    console.log("[AltOptimizer][auth/callback] Session stored:", sessionId);
-  } catch (err) {
-    console.error("[AltOptimizer][auth/callback] Session storage error:", err);
-  }
+  const payload = Buffer.from(JSON.stringify(sessionData)).toString("base64url");
+  const signedPayload = await signPayload(payload);
 
-  // --- Store shop record ---
-  try {
-    const existing = await prisma.shop.findUnique({
-      where: { shopDomain: shop },
-    });
-    if (!existing) {
-      await prisma.shop.create({
-        data: {
-          shopDomain: shop,
-          accessToken,
-          planType: "free",
-          status: "active",
-        },
-      });
-      console.log("[AltOptimizer][auth/callback] Shop record CREATED:", shop);
-    } else {
-      await prisma.shop.update({
-        where: { shopDomain: shop },
-        data: {
-          status: "active",
-          accessToken,
-        },
-      });
-      console.log("[AltOptimizer][auth/callback] Shop record UPDATED:", shop);
-    }
-  } catch (err) {
-    console.error("[AltOptimizer][auth/callback] Shop record error:", err);
-  }
+  // Cookie value: signed payload (URL-safe)
+  const cookieValue = encodeURIComponent(signedPayload);
+  const cookieMaxAge = 30 * 24 * 60 * 60; // 30 days in seconds
 
-  // --- Redirect to /app with shop cookie as fallback ---
-  console.log("[AltOptimizer][auth/callback] === SUCCESS, redirecting to /app?shop=", shop);
+  console.log("[AltOptimizer][auth/callback] Session cookie created for:", shop);
+  console.log("[AltOptimizer][auth/callback] Cookie size:", cookieValue.length, "bytes");
+  console.log("[AltOptimizer][auth/callback] === SUCCESS, redirecting to /app");
+
+  // Set multiple cookies for easy access
+  const cookies = [
+    `altopt_shop=${encodeURIComponent(shop)}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure`,
+    `altopt_token=${cookieValue}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure; HttpOnly`,
+  ];
 
   return new Response(null, {
     status: 302,
     headers: {
       Location: `/app?shop=${shop}`,
-      "Set-Cookie": `shop_domain=${encodeURIComponent(shop)}; Path=/; Max-Age=31536000; SameSite=None; Secure`,
+      "Set-Cookie": cookies.join(", "),
     },
   });
 }

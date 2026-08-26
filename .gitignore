@@ -95,3 +95,4 @@ logs/
 # CodeGraph index
 .codegraph
 .env*
+_tmp_*
