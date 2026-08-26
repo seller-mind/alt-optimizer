@@ -18,6 +18,7 @@ import {
   Banner,
   Toast,
   Frame,
+  Box,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
