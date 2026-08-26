@@ -3,20 +3,10 @@ import { LoaderFunctionArgs } from "@remix-run/node";
 const APP_URL = process.env.SHOPIFY_APP_URL || "https://alt-optimizer.vercel.app";
 const CLIENT_ID = process.env.SHOPIFY_API_KEY || "bf1b9b6eef0ca0ed0584705f23681ddd";
 const CLIENT_SECRET = process.env.SHOPIFY_API_SECRET || "";
-const SESSION_SECRET = process.env.SESSION_SECRET || "alt-optimizer-dev-secret-change-me";
 
 function redirectWithLog(url: string, reason: string) {
   console.error(`[AltOptimizer][auth/callback] REDIRECT → ${url} | ${reason}`);
   return new Response(null, { status: 302, headers: { Location: url } });
-}
-
-async function signPayload(payload: string): Promise<string> {
-  const crypto = await import("crypto");
-  const signature = crypto
-    .createHmac("sha256", SESSION_SECRET)
-    .update(payload)
-    .digest("hex");
-  return `${payload}.${signature}`;
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -24,12 +14,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const code = url.searchParams.get("code");
   const shop = url.searchParams.get("shop");
   const hmac = url.searchParams.get("hmac");
-  const state = url.searchParams.get("state");
 
   console.log("[AltOptimizer][auth/callback] === START ===");
   console.log("[AltOptimizer][auth/callback] shop:", shop);
   console.log("[AltOptimizer][auth/callback] hasCode:", !!code, "code:", code?.slice(0, 10));
-  console.log("[AltOptimizer][auth/callback] hasHmac:", !!hmac);
   console.log("[AltOptimizer][auth/callback] hasClientSecret:", !!CLIENT_SECRET);
 
   if (!code || !shop) {
@@ -63,7 +51,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // --- Exchange code for access token ---
   console.log("[AltOptimizer][auth/callback] Exchanging code for token...");
-  console.log("[AltOptimizer][auth/callback] POST https://", shop, "/admin/oauth/access_token");
 
   let tokenResponse;
   try {
@@ -91,40 +78,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const tokenData = await tokenResponse.json();
-  const accessToken = tokenData.access_token;
-  const scope = tokenData.scope;
+  console.log("[AltOptimizer][auth/callback] Token exchange SUCCESS, scope:", tokenData.scope);
 
-  console.log("[AltOptimizer][auth/callback] Token exchange SUCCESS, scope:", scope);
-
-  // --- Store session in signed cookie ---
-  // Format: base64(json({shop, accessToken, scope, expires}))
-  const sessionData = {
-    shop,
-    accessToken,
-    scope: scope || "read_products,write_products,read_themes,write_themes,read_content,write_content",
-    expires: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
-  };
-
-  const payload = Buffer.from(JSON.stringify(sessionData)).toString("base64url");
-  const signedPayload = await signPayload(payload);
-
-  // Cookie value: signed payload (URL-safe)
-  const cookieValue = encodeURIComponent(signedPayload);
-  const cookieMaxAge = 30 * 24 * 60 * 60; // 30 days in seconds
-
-  console.log("[AltOptimizer][auth/callback] Session cookie created for:", shop);
-  console.log("[AltOptimizer][auth/callback] Cookie size:", cookieValue.length, "bytes");
-  console.log("[AltOptimizer][auth/callback] === SUCCESS, redirecting to /app");
-
-  // Set multiple cookies (must use separate Set-Cookie headers)
-  const headers = new Headers();
-  headers.append("Set-Cookie", `altopt_shop=${encodeURIComponent(shop)}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure`);
-  headers.append("Set-Cookie", `altopt_token=${cookieValue}; Path=/; Max-Age=${cookieMaxAge}; SameSite=None; Secure; HttpOnly`);
-  headers.set("Location", `/app?shop=${shop}`);
+  // --- Redirect to /app with shop param ---
+  // No SameSite=None cookies! They cause oauth_error=same_site_cookies.
+  // The app uses JWT from App Bridge for authentication instead.
+  console.log("[AltOptimizer][auth/callback] Redirecting to /app?shop=", shop);
 
   return new Response(null, {
     status: 302,
-    headers,
+    headers: {
+      Location: `/app?shop=${shop}`,
+    },
   });
 }
 

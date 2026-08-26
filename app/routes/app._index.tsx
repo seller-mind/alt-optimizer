@@ -8,7 +8,8 @@ import {
 import { CheckCircleIcon, AlertTriangleIcon } from "@shopify/polaris-icons";
 import { useState, useCallback } from "react";
 
-// --- Cookie session helpers (no DB dependency) ---
+// --- Session helpers (JWT-first, no cross-site cookies) ---
+
 function getCookie(req: Request, name: string): string | null {
   const cookieHeader = req.headers.get("Cookie") || "";
   const match = cookieHeader
@@ -18,78 +19,61 @@ function getCookie(req: Request, name: string): string | null {
   return match ? decodeURIComponent(match.split("=").slice(1).join("=")) : null;
 }
 
-async function verifySession(req: Request): Promise<{ shop: string; accessToken: string; scope: string } | null> {
-  // Try reading the signed token cookie first
-  const tokenCookie = getCookie(req, "altopt_token");
-  const shopCookie = getCookie(req, "altopt_shop");
-  const SESSION_SECRET = process.env.SESSION_SECRET || "alt-optimizer-dev-secret-change-me";
+/**
+ * Extract shop domain from Shopify App Bridge JWT token.
+ * Every embedded app request includes Authorization: Bearer <jwt>
+ * JWT payload contains: { dest: "https://SHOP.myshopify.com", iss, sub, ... }
+ */
+function getShopFromJWT(request: Request): string | null {
+  const authHeader = request.headers.get("Authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) return null;
 
-  if (tokenCookie) {
-    try {
-      // Verify signature
-      const lastDot = tokenCookie.lastIndexOf(".");
-      const payload = tokenCookie.slice(0, lastDot);
-      const signature = tokenCookie.slice(lastDot + 1);
-
-      const crypto = await import("crypto");
-      const expectedSig = crypto
-        .createHmac("sha256", SESSION_SECRET)
-        .update(payload)
-        .digest("hex");
-
-      if (expectedSig !== signature) {
-        console.log("[AltOptimizer] Cookie signature mismatch");
-        return null;
-      }
-
-      const data = JSON.parse(Buffer.from(payload, "base64url").toString());
-      if (data.expires && data.expires < Date.now()) {
-        console.log("[AltOptimizer] Session expired");
-        return null;
-      }
-      console.log("[AltOptimizer] Cookie session OK for:", data.shop);
-      return { shop: data.shop, accessToken: data.accessToken, scope: data.scope };
-    } catch (e) {
-      console.error("[AltOptimizer] Cookie parse error:", e);
-    }
+  const token = authHeader.slice("Bearer ".length);
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    // Decode payload (second part, base64url) without verification
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf-8")
+    );
+    // dest is like "https://haimo-dev.myshopify.com"
+    const dest: string = payload.dest || "";
+    const match = dest.match(/https:\/\/([^.]+\.myshopify\.com)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
   }
-
-  // Fallback: just use the shop cookie without token (limited access)
-  if (shopCookie) {
-    console.log("[AltOptimizer] Using shop-only cookie (no token) for:", shopCookie);
-    return { shop: shopCookie, accessToken: "", scope: "" };
-  }
-
-  return null;
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   let shopDomain = url.searchParams.get("shop") || "";
 
-  // Try cookie-based session
-  const session = await verifySession(request);
-
-  if (!shopDomain && session) {
-    shopDomain = session.shop;
+  // Priority 1: JWT from App Bridge (always present in embedded iframe)
+  if (!shopDomain) {
+    shopDomain = getShopFromJWT(request) || "";
+    if (shopDomain) {
+      console.log("[AltOptimizer] Shop from JWT:", shopDomain);
+    }
   }
 
-  console.log("[AltOptimizer] app._index loader - shopDomain:", shopDomain, "hasSession:", !!session, "url:", request.url);
+  // Priority 2: Cookie fallback (for non-embedded access)
+  if (!shopDomain) {
+    const cookieShop = getCookie(request, "altopt_shop");
+    if (cookieShop) {
+      shopDomain = cookieShop;
+      console.log("[AltOptimizer] Shop from cookie:", shopDomain);
+    }
+  }
+
+  console.log("[AltOptimizer] app._index loader - shopDomain:", shopDomain, "url:", request.url);
 
   if (!shopDomain) {
-    console.log("[AltOptimizer] No shop param or session cookie, redirecting to install");
+    console.log("[AltOptimizer] No shop found (no JWT, no cookie, no URL param), redirecting to install");
     return redirect("/install");
   }
 
-  const accessToken = session?.accessToken || "";
-  if (!accessToken) {
-    console.log("[AltOptimizer] No access token for:", shopDomain, "- redirecting to install");
-    return redirect("/install");
-  }
-
-  console.log("[AltOptimizer] Auth OK for shop:", shopDomain, "token:", accessToken.slice(0, 10));
-
-  // Use default stats (no DB dependency)
+  // For now, show dashboard with default stats (no DB, no API calls yet)
   const stats = {
     totalProducts: 0, totalImages: 0, imagesWithAlt: 0,
     imagesWithAi: 0, imagesPending: 0, totalGenerated: 0, totalApiCalls: 0,
@@ -100,14 +84,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     planType: "free", remaining: 50,
   };
 
-  const isNewUser = true;
-  const showOnboarding = true;
-
   return {
     stats, usage,
     shopDomain,
     planType: "free",
-    showOnboarding,
+    showOnboarding: true,
     onboardingStep: "welcome",
     needsReview: false,
     hasAiGenerated: false,
