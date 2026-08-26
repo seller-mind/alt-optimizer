@@ -1,14 +1,14 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
-import { Page, Card, Text, BlockStack, Button } from "@shopify/polaris";
+import { Page, Card, Text, BlockStack, Button, FormLayout, TextField } from "@shopify/polaris";
 import { useState } from "react";
+import { Form, useActionData } from "@remix-run/react";
+import type { ActionFunctionArgs } from "@remix-run/node";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
 
-  // If shop param is present, redirect to /app which triggers authenticate.admin()
-  // The SDK handles the full OAuth flow automatically
   if (shop) {
     return redirect(`/app?shop=${encodeURIComponent(shop)}`);
   }
@@ -16,13 +16,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return null;
 };
 
-export default function Install() {
-  const [shop, setShop] = useState("haimo-dev.myshopify.com");
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const formData = await request.formData();
+  const shop = formData.get("shop") as string;
+  
+  if (shop) {
+    return redirect(`/app?shop=${encodeURIComponent(shop)}`);
+  }
+  
+  return { error: "Please enter a valid shop domain" };
+};
 
-  const handleInstall = () => {
-    const appUrl = "https://alt-optimizer.vercel.app";
-    window.location.href = `${appUrl}/app?shop=${encodeURIComponent(shop)}`;
-  };
+export default function Install() {
+  const actionData = useActionData<typeof action>();
+  const [shop, setShop] = useState("");
 
   return (
     <Page>
@@ -34,26 +41,23 @@ export default function Install() {
           <Text as="p">
             Enter your Shopify store domain to begin installation.
           </Text>
-          <input
-            type="text"
-            value={shop}
-            onChange={(e) => setShop(e.target.value)}
-            placeholder="your-store.myshopify.com"
-            style={{
-              padding: "8px 12px",
-              border: "1px solid #dfe3e8",
-              borderRadius: "4px",
-              fontSize: "14px",
-              width: "100%",
-              maxWidth: "400px",
-            }}
-          />
-          <Button variant="primary" onClick={handleInstall}>
-            Install App →
-          </Button>
-          <Text as="p" variant="bodySm" tone="subdued">
-            You will be redirected to Shopify to authorize the app.
-          </Text>
+          <Form method="post">
+            <FormLayout>
+              <TextField
+                type="text"
+                name="shop"
+                label="Shop domain"
+                helpText="e.g: my-shop.myshopify.com"
+                value={shop}
+                onChange={setShop}
+                autoComplete="on"
+                error={actionData?.error}
+              />
+              <Button submit variant="primary">
+                Install App →
+              </Button>
+            </FormLayout>
+          </Form>
         </BlockStack>
       </Card>
     </Page>

@@ -5,11 +5,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
   
-  // Redirect to /app with shop param to trigger OAuth flow
+  // If shop param provided, go to auth/login to start OAuth
   if (shop) {
-    return redirect(`/app?shop=${encodeURIComponent(shop)}`);
+    return redirect(`/auth/login?shop=${encodeURIComponent(shop)}`);
   }
   
-  // No shop param - redirect to install page
-  return redirect("/install");
+  // Otherwise go to /auth to show install form
+  return redirect("/auth");
 };
