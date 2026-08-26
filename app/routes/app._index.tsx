@@ -1,5 +1,5 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
-import { json } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigate, useSubmit, useNavigation } from "@remix-run/react";
 import {
   Page, Layout, Card, Text, Grid, BlockStack, InlineStack,
@@ -14,7 +14,22 @@ import { useState, useCallback } from "react";
 import { getOrCreateShop } from "~/utils/shop.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  let authResult;
+  try {
+    authResult = await authenticate.admin(request);
+  } catch (error) {
+    // Auth failed - redirect to install page
+    console.log("[AltOptimizer] Auth failed, redirecting to install:", error);
+    return redirect("/install");
+  }
+
+  // If authenticate returned a Response (OAuth redirect), redirect to install instead
+  if (authResult instanceof Response) {
+    console.log("[AltOptimizer] No session, redirecting to install");
+    return redirect("/install");
+  }
+
+  const { session } = authResult;
   const shop = await getOrCreateShop(session.shop);
 
   let stats, usage;

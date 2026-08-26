@@ -4,46 +4,48 @@ import { boundary } from "@shopify/shopify-app-remix/server";
 import shopify from "~/shopify.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  try {
-    const { session } = await shopify.authenticate.admin(request);
-    // OAuth completed successfully — redirect to app
-    if (session) {
-      const url = new URL(request.url);
-      const shop = url.searchParams.get("shop") || session.shop;
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: `/app?shop=${shop}`,
-          "X-Frame-Options": "ALLOWALL",
-        },
-      });
-    }
-    return null;
-  } catch (error) {
-    console.error("[AltOptimizer] Auth error:", error);
-    throw error;
+  const authResult = await shopify.authenticate.admin(request);
+  
+  // If authenticate returned a session, redirect to app
+  if (authResult && "session" in authResult && authResult.session) {
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop") || authResult.session.shop;
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `/app?shop=${shop}`,
+      },
+    });
   }
+  
+  // If authenticate returned a Response (OAuth redirect), pass it through
+  // The route-level headers() will add iframe-breakout headers
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+  
+  return null;
 }
 
 export async function action({ request }: ActionFunctionArgs) {
-  try {
-    const { session } = await shopify.authenticate.admin(request);
-    if (session) {
-      const url = new URL(request.url);
-      const shop = url.searchParams.get("shop") || session.shop;
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: `/app?shop=${shop}`,
-          "X-Frame-Options": "ALLOWALL",
-        },
-      });
-    }
-    return null;
-  } catch (error) {
-    console.error("[AltOptimizer] Auth action error:", error);
-    throw error;
+  const authResult = await shopify.authenticate.admin(request);
+  
+  if (authResult && "session" in authResult && authResult.session) {
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop") || authResult.session.shop;
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `/app?shop=${shop}`,
+      },
+    });
   }
+  
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+  
+  return null;
 }
 
 export function ErrorBoundary() {
