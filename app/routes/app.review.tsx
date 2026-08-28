@@ -52,6 +52,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         select: {
           title: true,
           handle: true,
+          shopifyProductId: true,
         },
       },
     },
@@ -91,6 +92,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       altTextAi: img.altTextAi,
       status: img.status,
       shopifyImageId: img.shopifyImageId,
+      shopifyProductId: img.product.shopifyProductId,
       productTitle: img.product.title,
       productHandle: img.product.handle,
     })),
@@ -118,11 +120,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const imageId = parseInt(imageIdStr, 10);
         const image = await prisma.productImage.findFirst({
           where: { id: imageId, product: { shopId: shop.id } },
+          include: { product: { select: { shopifyProductId: true } } },
         });
 
         if (!image || !image.altTextAi) continue;
 
-        const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
+        const success = await updateImageAltText(admin, image.product.shopifyProductId, image.shopifyImageId, image.altTextAi);
 
         if (success) {
           await prisma.productImage.update({
@@ -185,6 +188,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       const image = await prisma.productImage.findFirst({
         where: { id: imageId, product: { shopId: shop.id } },
+        include: { product: { select: { shopifyProductId: true } } },
       });
 
       if (!image) {
@@ -198,7 +202,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       const autoApply = formData.get("autoApply") === "true";
       if (autoApply) {
-        const success = await updateImageAltText(admin, image.shopifyImageId, newAltText.trim());
+        const success = await updateImageAltText(admin, image.product.shopifyProductId, image.shopifyImageId, newAltText.trim());
         if (success) {
           await prisma.productImage.update({
             where: { id: imageId },
@@ -220,6 +224,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           status: "pending",
           altTextAi: { not: null },
         },
+        include: { product: { select: { shopifyProductId: true } } },
       });
 
       let approved = 0;
@@ -227,7 +232,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       for (const image of pendingImages) {
         if (!image.altTextAi) continue;
 
-        const success = await updateImageAltText(admin, image.shopifyImageId, image.altTextAi);
+        const success = await updateImageAltText(admin, image.product.shopifyProductId, image.shopifyImageId, image.altTextAi);
         if (success) {
           await prisma.productImage.update({
             where: { id: image.id },

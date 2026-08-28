@@ -126,18 +126,20 @@ export async function fetchProducts(
 
 export async function updateImageAltText(
   admin: any,
+  productId: string,
   imageId: string,
   altText: string
 ): Promise<boolean> {
   const response = await admin.graphql(
-    `mutation UpdateMediaAlt($media: [UpdateMediaInput!]!) {
-      productUpdateMedia(media: $media) {
+    `mutation UpdateMediaAlt($productId: ID!, $media: [UpdateMediaInput!]!) {
+      productUpdateMedia(productId: $productId, media: $media) {
         media { id alt }
         mediaUserErrors { field message }
       }
     }`,
     {
       variables: {
+        productId,
         media: [{ id: imageId, alt: altText }],
       },
     }

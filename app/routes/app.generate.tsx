@@ -135,7 +135,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         });
 
         if (autoApply) {
-          await updateImageAltText(admin, image.shopifyImageId, analysis.altText);
+          await updateImageAltText(admin, image.product.shopifyProductId, image.shopifyImageId, analysis.altText);
         }
 
         await prisma.altTextHistory.create({
