@@ -149,9 +149,9 @@ export async function analyzeImage(
         ? Object.assign(new Error(apiError.message), { status: lastStatus })
         : (error instanceof Error ? error : new Error(String(error)));
 
-      // On rate limit or server errors, wait before retry
+      // On rate limit, wait longer to let the rate window reset; on other API errors, shorter wait
       if (error instanceof OpenAI.RateLimitError || error instanceof OpenAI.APIError) {
-        const waitMs = lastStatus === 429 ? 5000 * (attempt + 1) : 1000 * (attempt + 1);
+        const waitMs = lastStatus === 429 ? 30000 * (attempt + 1) : 2000 * (attempt + 1);
         await new Promise((r) => setTimeout(r, waitMs));
       }
     }
