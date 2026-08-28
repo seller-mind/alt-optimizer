@@ -10,7 +10,7 @@ const openai = new OpenAI({
 });
 
 /** Maximum number of retries for invalid API responses */
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 2;
 
 /** Parsed result from image analysis */
 interface ImageAnalysisResult {
@@ -112,7 +112,7 @@ export async function analyzeImage(
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: ALT_TEXT_SYSTEM_PROMPT },
           {
@@ -202,7 +202,7 @@ ${localeInstruction}`;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: TAGS_SYSTEM_PROMPT },
           {
