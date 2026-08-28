@@ -122,6 +122,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shop.locale
         );
 
+        if (!analysis.altText || analysis.altText.trim().length === 0) {
+          throw new Error("AI returned empty alt text");
+        }
+
         await prisma.productImage.update({
           where: { id: imageId },
           data: {
@@ -179,15 +183,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     const successCount = results.filter((r) => r.success).length;
+    const failedResults = results.filter((r) => !r.success);
+
     if (successCount > 0) {
       await incrementUsage(shop.id, "images", successCount);
     }
 
     return json({
-      success: true,
+      success: successCount > 0,
       generated: successCount,
       total: imageIds.length,
       results,
+      error: successCount === 0 && failedResults.length > 0
+        ? failedResults.map((r) => r.error).filter(Boolean).join("; ")
+        : undefined,
     });
   }
 

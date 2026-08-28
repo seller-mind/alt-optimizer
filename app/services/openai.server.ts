@@ -145,11 +145,8 @@ export async function analyzeImage(
     }
   }
 
-  // All retries exhausted
-  return {
-    altText: "",
-    analysis: { objects: [], colors: [], context: "", category: "" },
-  };
+  // All retries exhausted — throw instead of returning empty result
+  throw lastError || new Error("Failed to generate alt text after retries");
 }
 
 /**
@@ -216,7 +213,8 @@ ${localeInstruction}`;
     }
   }
 
-  return { tags: [] };
+  // All retries exhausted — throw instead of returning empty result
+  throw lastError || new Error("Failed to generate tags after retries");
 }
 
 /**
