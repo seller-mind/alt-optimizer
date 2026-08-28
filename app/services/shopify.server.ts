@@ -130,7 +130,7 @@ export async function updateImageAltText(
   altText: string
 ): Promise<boolean> {
   const response = await admin.graphql(
-    `mutation UpdateMediaAlt($media: [MediaUpdateInput!]!) {
+    `mutation UpdateMediaAlt($media: [UpdateMediaInput!]!) {
       productUpdateMedia(media: $media) {
         media { id alt }
         mediaUserErrors { field message }
