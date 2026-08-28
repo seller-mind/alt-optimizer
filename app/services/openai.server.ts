@@ -82,27 +82,32 @@ export function validateEnvironment(): void {
  * Analyze a product image and generate SEO-optimized alt text.
  * Retries up to MAX_RETRIES times if the API returns invalid/empty responses.
  *
- * @param imageBase64 - Base64-encoded image data
- * @param mimeType - MIME type of the image (e.g., "image/jpeg")
+ * @param imageBase64OrUrl - Base64-encoded image data OR a public image URL
+ * @param mimeType - MIME type of the image (e.g., "image/jpeg"). Pass empty string if using URL.
  * @param productTitle - Optional product title for context
  * @param locale - Locale for output language (default: "en")
  * @returns AltTextResult with generated alt text and analysis
  */
 export async function analyzeImage(
-  imageBase64: string,
+  imageBase64OrUrl: string,
   mimeType: string,
   productTitle?: string,
   locale: string = "en"
 ): Promise<AltTextResult> {
   validateEnvironment();
   const localeInstruction = getLocaleInstruction(locale);
-  const dataUrl = `data:${mimeType};base64,${imageBase64}`;
+
+  // If it's a URL (starts with http), pass it directly; otherwise build data URL
+  const imageContent = imageBase64OrUrl.startsWith("http")
+    ? { type: "image_url" as const, image_url: { url: imageBase64OrUrl, detail: "high" } }
+    : { type: "image_url" as const, image_url: { url: `data:${mimeType};base64,${imageBase64OrUrl}`, detail: "high" } };
 
   const userMessage = productTitle
     ? `Product title: "${productTitle}"\n\n${localeInstruction}`
     : localeInstruction;
 
   let lastError: Error | null = null;
+  let lastStatus: number | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -114,7 +119,7 @@ export async function analyzeImage(
             role: "user",
             content: [
               { type: "text", text: userMessage },
-              { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+              imageContent,
             ],
           },
         ],
@@ -136,17 +141,28 @@ export async function analyzeImage(
 
       // Invalid/empty response — retry
       lastError = new Error("Empty alt text in response");
+      lastStatus = null;
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      const apiError = error as { status?: number; message?: string };
+      lastStatus = apiError.status ?? null;
+      lastError = apiError.message
+        ? Object.assign(new Error(apiError.message), { status: lastStatus })
+        : (error instanceof Error ? error : new Error(String(error)));
+
       // On rate limit or server errors, wait before retry
       if (error instanceof OpenAI.RateLimitError || error instanceof OpenAI.APIError) {
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        const waitMs = lastStatus === 429 ? 5000 * (attempt + 1) : 1000 * (attempt + 1);
+        await new Promise((r) => setTimeout(r, waitMs));
       }
     }
   }
 
-  // All retries exhausted — throw instead of returning empty result
-  throw lastError || new Error("Failed to generate alt text after retries");
+  // All retries exhausted — throw with status info for better error detection
+  const throwErr = lastError || new Error("Failed to generate alt text after retries");
+  if (lastStatus) {
+    (throwErr as any).status = lastStatus;
+  }
+  throw throwErr;
 }
 
 /**
@@ -161,7 +177,7 @@ export async function analyzeImage(
  * @returns TagsResult with generated tags array
  */
 export async function generateTags(
-  imageBase64: string,
+  imageBase64OrUrl: string,
   mimeType: string,
   productTitle: string,
   productDescription: string,
@@ -169,7 +185,11 @@ export async function generateTags(
 ): Promise<TagsResult> {
   validateEnvironment();
   const localeInstruction = getLocaleInstruction(locale);
-  const dataUrl = `data:${mimeType};base64,${imageBase64}`;
+
+  // If it's a URL (starts with http), pass it directly; otherwise build data URL
+  const imageContent = imageBase64OrUrl.startsWith("http")
+    ? { type: "image_url" as const, image_url: { url: imageBase64OrUrl, detail: "high" } }
+    : { type: "image_url" as const, image_url: { url: `data:${mimeType};base64,${imageBase64OrUrl}`, detail: "high" } };
 
   const userMessage = `Product Title: "${productTitle}"
 Product Description: "${productDescription || "No description available"}"
@@ -177,6 +197,7 @@ Product Description: "${productDescription || "No description available"}"
 ${localeInstruction}`;
 
   let lastError: Error | null = null;
+  let lastStatus: number | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
@@ -188,7 +209,7 @@ ${localeInstruction}`;
             role: "user",
             content: [
               { type: "text", text: userMessage },
-              { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+              imageContent,
             ],
           },
         ],
@@ -205,16 +226,25 @@ ${localeInstruction}`;
       }
 
       lastError = new Error("Empty tags in response");
+      lastStatus = null;
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      const apiError = error as { status?: number; message?: string };
+      lastStatus = apiError.status ?? null;
+      lastError = apiError.message
+        ? Object.assign(new Error(apiError.message), { status: lastStatus })
+        : (error instanceof Error ? error : new Error(String(error)));
       if (error instanceof OpenAI.RateLimitError || error instanceof OpenAI.APIError) {
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        const waitMs = lastStatus === 429 ? 5000 * (attempt + 1) : 1000 * (attempt + 1);
+        await new Promise((r) => setTimeout(r, waitMs));
       }
     }
   }
 
-  // All retries exhausted — throw instead of returning empty result
-  throw lastError || new Error("Failed to generate tags after retries");
+  const throwErr = lastError || new Error("Failed to generate tags after retries");
+  if (lastStatus) {
+    (throwErr as any).status = lastStatus;
+  }
+  throw throwErr;
 }
 
 /**

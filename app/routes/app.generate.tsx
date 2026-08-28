@@ -9,7 +9,7 @@ import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
-import { fetchImageAsBase64, updateImageAltText, updateProductTags } from "~/services/shopify.server";
+import { updateImageAltText, updateProductTags } from "~/services/shopify.server";
 import { checkQuota, enforceQuota, incrementUsage, QuotaExceededError } from "~/services/billing.server";
 import { PLANS } from "~/constants";
 import { getOrCreateShop } from "~/utils/shop.server";
@@ -114,10 +114,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (!image) return null;
 
       try {
-        const { base64, mimeType } = await fetchImageAsBase64(image.src);
+        // Pass image URL directly to OpenAI (avoid base64 overhead and size limits)
         const analysis = await analyzeImage(
-          base64,
-          mimeType,
+          image.src,
+          "",
           image.product.title,
           shop.locale
         );
@@ -155,15 +155,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
+        const status = (err as any)?.status ?? null;
         let friendlyError = message;
-        if (message.includes("429") || message.includes("rate limit")) {
-          friendlyError = "OpenAI rate limit hit. Please wait a moment and try again.";
+        if (status === 429 || message.includes("429") || message.toLowerCase().includes("rate limit")) {
+          friendlyError = `OpenAI rate limit hit (status ${status || "?"}). Please wait 1-2 minutes and try again.`;
+        } else if (status === 401 || message.includes("401") || message.includes("API key")) {
+          friendlyError = `OpenAI API key invalid (status 401). Check your environment variables.`;
+        } else if (status === 413 || message.includes("too large") || message.includes("413")) {
+          friendlyError = "Image too large for OpenAI API. Try a smaller image.";
         } else if (message.includes("timeout") || message.includes("timed out")) {
-          friendlyError = "Request timed out. The image may be too large. Try again.";
-        } else if (message.includes("401") || message.includes("API key")) {
-          friendlyError = "OpenAI API key is invalid or missing. Check your settings.";
-        } else if (message.includes("invalid image") || message.includes("corrupt")) {
-          friendlyError = "Invalid image data. Skipping this image.";
+          friendlyError = "Request timed out. The image may be too large or network is slow.";
+        } else if (status === 400 || message.includes("400") || message.includes("invalid")) {
+          friendlyError = `Invalid request (status ${status || 400}): ${message}`;
+        } else {
+          friendlyError = `OpenAI API error (status ${status || "?"}): ${message}`;
         }
 
         return {
@@ -222,10 +227,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       try {
         const firstImage = product.images[0];
-        const { base64, mimeType } = await fetchImageAsBase64(firstImage.src);
+        // Pass image URL directly to OpenAI
         const tagResult = await generateTags(
-          base64,
-          mimeType,
+          firstImage.src,
+          "",
           product.title,
           product.description,
           shop.locale
