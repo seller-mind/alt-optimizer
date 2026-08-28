@@ -114,7 +114,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (!image) return null;
 
       try {
-        // Pass image URL directly to OpenAI (avoid base64 overhead and size limits)
+        // Pass image URL directly to AI service (avoid base64 overhead and size limits)
         const analysis = await analyzeImage(
           image.src,
           "",
@@ -158,17 +158,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const status = (err as any)?.status ?? null;
         let friendlyError = message;
         if (status === 429 || message.includes("429") || message.toLowerCase().includes("rate limit")) {
-          friendlyError = `OpenAI rate limit hit (status ${status || "?"}). Please wait 1-2 minutes and try again.`;
+          friendlyError = `AI service rate limit hit (status ${status || "?"}). Please wait 1-2 minutes and try again.`;
         } else if (status === 401 || message.includes("401") || message.includes("API key")) {
-          friendlyError = `OpenAI API key invalid (status 401). Check your environment variables.`;
+          friendlyError = `AI service API key invalid (status 401). Check your environment variables.`;
         } else if (status === 413 || message.includes("too large") || message.includes("413")) {
-          friendlyError = "Image too large for OpenAI API. Try a smaller image.";
+          friendlyError = "Image too large for AI API. Try a smaller image.";
         } else if (message.includes("timeout") || message.includes("timed out")) {
           friendlyError = "Request timed out. The image may be too large or network is slow.";
         } else if (status === 400 || message.includes("400") || message.includes("invalid")) {
           friendlyError = `Invalid request (status ${status || 400}): ${message}`;
         } else {
-          friendlyError = `OpenAI API error (status ${status || "?"}): ${message}`;
+          friendlyError = `AI API error (status ${status || "?"}): ${message}`;
         }
 
         return {
@@ -227,7 +227,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       try {
         const firstImage = product.images[0];
-        // Pass image URL directly to OpenAI
+        // Pass image URL directly to AI service
         const tagResult = await generateTags(
           firstImage.src,
           "",

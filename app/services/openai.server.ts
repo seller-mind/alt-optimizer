@@ -1,12 +1,13 @@
 import OpenAI from "openai";
 
 /**
- * OpenAI GPT-4o client for image analysis and content generation.
- * Uses the OPENAI_API_KEY environment variable for authentication.
+ * DeepSeek API client for image analysis and content generation.
+ * Uses OpenAI-compatible SDK with DeepSeek base URL.
  */
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || "",
+const client = new OpenAI({
+  apiKey: process.env.DEEPSEEK_API_KEY || "",
+  baseURL: "https://api.deepseek.com",
 });
 
 /** Maximum number of retries for invalid API responses */
@@ -67,13 +68,13 @@ Respond in JSON format with:
 
 /**
  * Validate that the environment is properly configured.
- * Throws if OPENAI_API_KEY is missing.
+ * Throws if DEEPSEEK_API_KEY is missing.
  */
 export function validateEnvironment(): void {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.DEEPSEEK_API_KEY) {
     throw new Error(
-      "OPENAI_API_KEY environment variable is not set. " +
-      "Please add it to your .env file. You can get an API key from https://platform.openai.com/api-keys"
+      "DEEPSEEK_API_KEY environment variable is not set. " +
+      "Please add it to your Vercel environment variables."
     );
   }
 }
@@ -111,8 +112,8 @@ export async function analyzeImage(
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+      const response = await client.chat.completions.create({
+        model: "deepseek-v4-flash-vision-exp",
         messages: [
           { role: "system", content: ALT_TEXT_SYSTEM_PROMPT },
           {
@@ -150,7 +151,7 @@ export async function analyzeImage(
         : (error instanceof Error ? error : new Error(String(error)));
 
       // On rate limit, wait longer to let the rate window reset; on other API errors, shorter wait
-      if (error instanceof OpenAI.RateLimitError || error instanceof OpenAI.APIError) {
+      if (lastStatus === 429 || (apiError.status && apiError.status >= 400)) {
         const waitMs = lastStatus === 429 ? 30000 * (attempt + 1) : 2000 * (attempt + 1);
         await new Promise((r) => setTimeout(r, waitMs));
       }
@@ -201,8 +202,8 @@ ${localeInstruction}`;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+      const response = await client.chat.completions.create({
+        model: "deepseek-v4-flash-vision-exp",
         messages: [
           { role: "system", content: TAGS_SYSTEM_PROMPT },
           {
@@ -233,8 +234,8 @@ ${localeInstruction}`;
       lastError = apiError.message
         ? Object.assign(new Error(apiError.message), { status: lastStatus })
         : (error instanceof Error ? error : new Error(String(error)));
-      if (error instanceof OpenAI.RateLimitError || error instanceof OpenAI.APIError) {
-        const waitMs = lastStatus === 429 ? 5000 * (attempt + 1) : 1000 * (attempt + 1);
+      if (lastStatus === 429 || (apiError.status && apiError.status >= 400)) {
+        const waitMs = lastStatus === 429 ? 30000 * (attempt + 1) : 1000 * (attempt + 1);
         await new Promise((r) => setTimeout(r, waitMs));
       }
     }
