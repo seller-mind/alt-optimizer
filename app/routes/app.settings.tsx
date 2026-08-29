@@ -20,7 +20,6 @@ import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { getCurrentUsage, getUsageHistory, deleteShopData } from "~/services/billing.server";
-import { PLANS } from "~/constants";
 import { getOrCreateShop } from "~/utils/shop.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -38,11 +37,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     locale: shop.locale,
     usage,
     history,
-    plans: Object.entries(PLANS).map(([key, plan]) => ({
-      key,
-      ...plan,
-      isCurrent: key === shop.planType,
-    })),
   };
 };
 
@@ -52,19 +46,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const intent = formData.get("intent") as string;
-
-  if (intent === "update_plan") {
-    const newPlan = formData.get("plan") as string;
-    if (newPlan === "free" || !PLANS[newPlan]) {
-      return json({ success: false, error: "Please use the Shopify billing flow to change your plan." });
-    }
-    // Plan changes should go through Shopify Billing API, not direct DB update.
-    // Redirect user to Shopify subscription management.
-    return json({
-      success: false,
-      error: "Plan upgrades are managed through Shopify. Please visit the Shopify App Store to change your subscription.",
-    });
-  }
 
   if (intent === "update_locale") {
     const locale = formData.get("locale") as string;
@@ -84,22 +65,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SettingsPage() {
-  const { shopDomain, planType, locale, usage, history, plans } = useLoaderData<typeof loader>();
+  const { shopDomain, planType, locale, usage, history } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isProcessing = navigation.state !== "idle";
 
-  const [selectedPlan, setSelectedPlan] = useState(planType);
   const [selectedLocale, setSelectedLocale] = useState(locale);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  const handleUpdatePlan = useCallback(() => {
-    const formData = new FormData();
-    formData.set("intent", "update_plan");
-    formData.set("plan", selectedPlan);
-    submit(formData, { method: "post" });
-  }, [selectedPlan, submit]);
 
   const handleUpdateLocale = useCallback(() => {
     const formData = new FormData();
