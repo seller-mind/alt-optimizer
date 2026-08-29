@@ -27,7 +27,7 @@ import prisma from "~/db.server";
 import { updateImageAltText } from "~/services/shopify.server";
 import { getOrCreateShop } from "~/utils/shop.server";
 
-type ReviewFilter = "all" | "pending" | "approved" | "rejected";
+type ReviewFilter = "all" | "pending" | "applied" | "rejected";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -72,7 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const statusCounts: Record<string, number> = {
     pending: 0,
-    approved: 0,
+    applied: 0,
     rejected: 0,
   };
 
@@ -82,7 +82,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  const reviewed = (statusCounts.approved || 0) + (statusCounts.rejected || 0);
+  const reviewed = (statusCounts.applied || 0) + (statusCounts.rejected || 0);
 
   return {
     images: images.map((img) => ({
@@ -321,7 +321,7 @@ export default function ReviewPage() {
 
   const tabs = useMemo(() => [
     { id: "pending", content: `Pending (${statusCounts.pending || 0})` },
-    { id: "approved", content: `Applied (${statusCounts.approved || 0})` },
+    { id: "applied", content: `Applied (${statusCounts.applied || 0})` },
     { id: "rejected", content: `Rejected (${statusCounts.rejected || 0})` },
     { id: "all", content: "All" },
   ], [statusCounts]);
