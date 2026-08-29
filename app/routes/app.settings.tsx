@@ -108,27 +108,6 @@ export default function SettingsPage() {
     submit(formData, { method: "post" });
   }, [selectedLocale, submit]);
 
-  const planRows = plans.map((plan) => [
-    <InlineStack gap="200" key={plan.key} align="start">
-      <Text as="p" fontWeight="semibold">{plan.name}</Text>
-      {plan.isCurrent && <Badge tone="success">Current</Badge>}
-    </InlineStack>,
-    plan.price === 0 ? "Free" : `$${plan.price}/mo`,
-    `${plan.monthlyQuota} images`,
-    plan.description,
-    !plan.isCurrent ? (
-      <Button
-        size="slim"
-        variant={plan.key === selectedPlan ? "primary" : "plain"}
-        onClick={() => setSelectedPlan(plan.key)}
-      >
-        {plan.key === selectedPlan ? "Selected" : "Select"}
-      </Button>
-    ) : (
-      <Badge tone="info">Active</Badge>
-    ),
-  ]);
-
   const usageRows = history.slice(0, 14).map((h) => [
     h.date,
     String(h.imagesGenerated + h.tagsGenerated + h.jsonLdGenerated),
@@ -159,27 +138,14 @@ export default function SettingsPage() {
 
         <Layout.Section>
           <Card>
-            <BlockStack gap="400">
-              <Text as="h2" variant="headingMd">
-                Subscription Plans
+            <BlockStack gap="200">
+              <Text as="h2" variant="headingMd">Plan</Text>
+              <Text as="p" variant="bodyMd">
+                AltOptimizer is free to install and includes {usage.quota} AI image generations every month.
               </Text>
-              <Text as="p" variant="bodyMd" tone="subdued">
-                Choose the plan that fits your store's needs.
+              <Text as="p" variant="bodySm" tone="subdued">
+                Your monthly usage resets automatically.
               </Text>
-              <DataTable
-                columnContentTypes={["text", "text", "text", "text", "text"]}
-                headings={["Plan", "Price", "Quota", "Description", "Action"]}
-                rows={planRows}
-              />
-              {selectedPlan !== planType && (
-                <Button
-                  variant="primary"
-                  onClick={handleUpdatePlan}
-                  disabled={isProcessing}
-                >
-                  {isProcessing ? "Updating..." : `Switch to ${PLANS[selectedPlan]?.name || selectedPlan}`}
-                </Button>
-              )}
             </BlockStack>
           </Card>
         </Layout.Section>

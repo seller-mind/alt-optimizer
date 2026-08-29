@@ -14,10 +14,6 @@ const shopify = shopifyApp({
   scopes: [
     "read_products",
     "write_products",
-    "read_themes",
-    "write_themes",
-    "read_content",
-    "write_content",
   ],
   appUrl: process.env.SHOPIFY_APP_URL || "https://localhost:3000",
   isEmbeddedApp: true,

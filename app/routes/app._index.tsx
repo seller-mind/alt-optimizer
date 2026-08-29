@@ -287,19 +287,16 @@ export default function DashboardIndex() {
                 </BlockStack>
                 <Badge tone="info">{usage.planName}</Badge>
               </InlineStack>
-              {planType === "free" && (
-                <Box padding="300" borderRadius="200" background="bg-surface-secondary">
-                  <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">Upgrade to unlock more generations</Text>
-                    <List type="bullet">
-                      <List.Item><Text as="span" fontWeight="semibold">Starter ($9/mo):</Text> 300 images/month</List.Item>
-                      <List.Item><Text as="span" fontWeight="semibold">Professional ($19/mo):</Text> 1,000 images/month</List.Item>
-                      <List.Item><Text as="span" fontWeight="semibold">Business ($49/mo):</Text> 5,000 images/month</List.Item>
-                    </List>
-                    <Button variant="primary" onClick={() => navigate("/app/settings")}>Upgrade Plan</Button>
-                  </BlockStack>
-                </Box>
-              )}
+              <Box padding="300" borderRadius="200" background="bg-surface-secondary">
+                <BlockStack gap="100">
+                  <Text as="p" variant="bodyMd">
+                    AltOptimizer is free to install and includes {usage.quota} AI image generations every month.
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Generated alt text, tags, and structured data are applied directly to your products.
+                  </Text>
+                </BlockStack>
+              </Box>
             </BlockStack>
           </Card>
         </Layout.Section>
