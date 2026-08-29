@@ -11,7 +11,6 @@ import prisma from "~/db.server";
 import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
 import { updateImageAltText, updateProductTags } from "~/services/shopify.server";
 import { checkQuota, enforceQuota, incrementUsage, QuotaExceededError } from "~/services/billing.server";
-import { PLANS } from "~/constants";
 import { getOrCreateShop } from "~/utils/shop.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -329,12 +328,12 @@ export default function GeneratePage() {
 
   const [generationType, setGenerationType] = useState<string>("alt_text");
   const [autoApply, setAutoApply] = useState<string>("false");
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showQuotaInfoModal, setShowQuotaInfoModal] = useState(false);
 
   const allImageIds = products.flatMap((p) => p.images.map((img) => String(img.id)));
   const selectedResources = useIndexResourceState(products);
 
-  // Show upgrade modal when quota exceeded
+  // Show quota info modal when quota exceeded
   const showQuotaModal = actionData && !actionData.success && (actionData as any).quotaExceeded;
 
   const handleGenerate = useCallback(() => {
@@ -365,42 +364,33 @@ export default function GeneratePage() {
 
   return (
     <Page title="AI Generation" subtitle="Generate alt text, tags, and structured data">
-      {/* Upgrade Modal for Quota Exceeded */}
+      {/* Quota Info Modal */}
       <Modal
-        open={showQuotaModal || showUpgradeModal}
-        onClose={() => { setShowUpgradeModal(false); }}
-        title="Plan Upgrade Required"
+        open={showQuotaModal || showQuotaInfoModal}
+        onClose={() => { setShowQuotaInfoModal(false); }}
+        title="Monthly Quota"
         primaryAction={{
-          content: "View Plans",
-          onAction: () => window.open("/app/settings", "_self"),
+          content: "Got it",
+          onAction: () => setShowQuotaInfoModal(false),
         }}
-        secondaryActions={[{
-          content: "Dismiss",
-          onAction: () => setShowUpgradeModal(false),
-        }]}
       >
         <Modal.Section>
           <BlockStack gap="400">
-            <Banner tone="warning" title="Monthly quota exceeded">
-              <Text as="p">
-                {showQuotaModal && (actionData as any)?.error}
-              </Text>
-            </Banner>
-            <Text as="h3" variant="headingSm">Available Plans</Text>
-            {Object.entries(PLANS).filter(([key]) => key !== "free").map(([key, plan]) => (
-              <Card key={key} padding="400">
-                <BlockStack gap="200">
-                  <InlineStack align="space-between" wrap={false}>
-                    <Text as="h3" variant="headingMd">{plan.name}</Text>
-                    <Text as="p" variant="headingLg" fontWeight="bold">
-                      ${plan.price}<Text as="span" variant="bodySm" tone="subdued">/month</Text>
-                    </Text>
-                  </InlineStack>
-                  <Text as="p" variant="bodyMd">{plan.description}</Text>
-                  <Badge>{plan.monthlyQuota} generations/month</Badge>
-                </BlockStack>
-              </Card>
-            ))}
+            {showQuotaModal ? (
+              <Banner tone="warning" title="Monthly quota exceeded">
+                <Text as="p">
+                  {(actionData as any)?.error}
+                </Text>
+              </Banner>
+            ) : null}
+            <Text as="p" variant="bodyMd">
+              AltOptimizer is a free app that includes {quota.quota} AI generations per month.
+              Your usage resets automatically at the start of each calendar month.
+            </Text>
+            <Text as="p" variant="bodySm" tone="subdued">
+              You have used {quota.percentage}% of your monthly quota.
+              {quota.remaining} generations remaining this month.
+            </Text>
           </BlockStack>
         </Modal.Section>
       </Modal>
@@ -413,13 +403,13 @@ export default function GeneratePage() {
               title={quota.warning95 ? "Quota nearly exhausted" : "Quota warning"}
               tone={quota.warning95 ? "critical" : "warning"}
               action={{
-                content: "Upgrade Plan",
-                onAction: () => setShowUpgradeModal(true),
+                content: "View details",
+                onAction: () => setShowQuotaInfoModal(true),
               }}
             >
               <Text as="p">
                 You have used {quota.percentage}% of your monthly quota ({quota.remaining} remaining).
-                {quota.warning95 && " Please upgrade to avoid interruptions."}
+                {quota.warning95 && " Your quota resets at the start of each month."}
               </Text>
             </Banner>
           </Layout.Section>

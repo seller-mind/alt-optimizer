@@ -135,8 +135,8 @@ export default function DashboardIndex() {
         {(quotaWarning || quotaCritical) && (
           <Layout.Section>
             <Banner tone={quotaCritical ? "critical" : "warning"}
-              action={{ content: "Upgrade Plan", url: "/app/settings" }}>
-              <Text as="p">You've used {usage.percentage}% of your monthly quota ({usage.imagesGenerated}/{usage.quota} images).{quotaCritical && " Upgrade to avoid interruptions."}</Text>
+              action={{ content: "View details", url: "/app/settings" }}>
+              <Text as="p">You've used {usage.percentage}% of your monthly quota ({usage.imagesGenerated}/{usage.quota} images).{quotaCritical && " Your quota resets at the start of each month."}</Text>
             </Banner>
           </Layout.Section>
         )}
