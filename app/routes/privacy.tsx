@@ -3,7 +3,7 @@ import { useLoaderData } from "@remix-run/react";
 import { Page, Card, Text, BlockStack } from "@shopify/polaris";
 
 export const loader = async () => {
-  return json({ lastUpdated: "2024-01-01" });
+  return json({ lastUpdated: "2026-08-29" });
 };
 
 export default function PrivacyPage() {
@@ -20,7 +20,7 @@ export default function PrivacyPage() {
             AltOptimizer collects and processes the following data from your Shopify store:
           </Text>
           <Text as="p" variant="bodyMd">
-            • Product data: titles, descriptions, handles, SKUs, and prices
+            • Product data: titles, descriptions, handles, and image information
           </Text>
           <Text as="p" variant="bodyMd">
             • Product images: for AI analysis and alt text generation
@@ -51,40 +51,37 @@ export default function PrivacyPage() {
 
           <Text as="h3" variant="headingSm">3. How We Use Your Data</Text>
           <Text as="p" variant="bodyMd">
-            • Product images are sent to OpenAI's GPT-4o API for AI analysis to generate descriptive alt text
+            • Product images are sent to DeepSeek's AI API for image analysis to generate descriptive alt text
           </Text>
           <Text as="p" variant="bodyMd">
             • Product titles and descriptions are used to generate relevant tags and structured data
           </Text>
           <Text as="p" variant="bodyMd">
-            • Usage data is tracked for billing and quota management
+            • Usage data is tracked to enforce the monthly generation quota
           </Text>
 
           <Text as="h3" variant="headingSm">4. Data Storage and Retention</Text>
           <Text as="p" variant="bodyMd">
-            • Your data is stored securely in our database during your active subscription
+            • Your data is stored securely in our database while the app is installed
           </Text>
           <Text as="p" variant="bodyMd">
-            • After uninstalling the app, your data is retained for 30 days (grace period)
+            • After uninstalling the app, your data is retained for 30 days (grace period) and then permanently deleted
           </Text>
           <Text as="p" variant="bodyMd">
-            • After 30 days, all data is permanently deleted
-          </Text>
-          <Text as="p" variant="bodyMd">
-            • You can request immediate data deletion at any time from the Settings page
+            • You can request immediate data deletion at any time from the app's Settings page
           </Text>
 
           <Text as="h3" variant="headingSm">5. Data Sharing</Text>
           <Text as="p" variant="bodyMd">
-            • Product images are sent to OpenAI's API for AI analysis. OpenAI does not use your data for training.
+            • Product images are sent to DeepSeek's API (api.deepseek.com) for AI analysis. The API is used solely for generating alt text and related content.
           </Text>
           <Text as="p" variant="bodyMd">
-            • We do not sell, trade, or share your data with any third parties
+            • We do not sell, trade, or share your data with any other third parties
           </Text>
 
           <Text as="h3" variant="headingSm">6. Contact</Text>
           <Text as="p" variant="bodyMd">
-            For privacy-related inquiries, please contact the app developer through the Shopify App Store.
+            For privacy-related inquiries or data deletion requests, please contact the app developer through the Shopify App Store.
           </Text>
         </BlockStack>
       </Card>

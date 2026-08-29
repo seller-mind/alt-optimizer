@@ -10,7 +10,7 @@ import prisma from "./db.server";
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET,
-  apiVersion: ApiVersion.July25,
+  apiVersion: ApiVersion.July26,
   scopes: [
     "read_products",
     "write_products",
@@ -52,6 +52,18 @@ const shopify = shopifyApp({
   },
   webhooks: {
     APP_UNINSTALLED: {
+      deliveryMethod: "http",
+      callbackUrl: "/webhooks",
+    },
+    CUSTOMERS_DATA_REQUEST: {
+      deliveryMethod: "http",
+      callbackUrl: "/webhooks",
+    },
+    CUSTOMERS_REDACT: {
+      deliveryMethod: "http",
+      callbackUrl: "/webhooks",
+    },
+    SHOP_REDACT: {
       deliveryMethod: "http",
       callbackUrl: "/webhooks",
     },

@@ -39,13 +39,7 @@ api_version = "2026-07"
   topics = ["shop/redact"]
   uri = "/webhooks"
 
-  [[webhooks.subscriptions]]
-  topics = ["app_subscriptions/update"]
-  uri = "/webhooks"
 
-  [[webhooks.subscriptions]]
-  topics = ["app_subscriptions/decline"]
-  uri = "/webhooks"
 
 [pos]
 embedded = false

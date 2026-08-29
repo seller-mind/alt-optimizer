@@ -2,7 +2,7 @@ import { useState } from "react";
 
 const APP_URL = "https://alt-optimizer.vercel.app";
 const CLIENT_ID = "bf1b9b6eef0ca0ed0584705f23681ddd";
-const SCOPES = "read_products,write_products,read_themes,write_themes,read_content,write_content";
+const SCOPES = "read_products,write_products";
 const REDIRECT_URI = `${APP_URL}/auth/callback`;
 
 export default function InstallPage() {

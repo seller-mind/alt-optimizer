@@ -85,7 +85,7 @@ export default function DashboardIndex() {
             </Text>
             <BlockStack gap="300">
               <List type="bullet">
-                <List.Item><Text as="span" fontWeight="semibold">AI Alt Text Generation</Text> — GPT-4o analyzes your product images and generates SEO-optimized alt text under 125 characters</List.Item>
+                <List.Item><Text as="span" fontWeight="semibold">AI Alt Text Generation</Text> — AI vision analyzes your product images and generates SEO-optimized alt text under 125 characters</List.Item>
                 <List.Item><Text as="span" fontWeight="semibold">Smart Product Tags</Text> — Automatically generate relevant tags based on image content, product title, and description</List.Item>
                 <List.Item><Text as="span" fontWeight="semibold">JSON-LD Structured Data</Text> — Boost search visibility with Schema.org Product markup for every item</List.Item>
               </List>
@@ -149,7 +149,7 @@ export default function DashboardIndex() {
                 <Text as="p">Get started in 3 simple steps:</Text>
                 <List type="number">
                   <List.Item><Text as="span" fontWeight="semibold">Sync your products</Text> — Import all products from your Shopify store</List.Item>
-                  <List.Item><Text as="span" fontWeight="semibold">Generate AI alt text</Text> — Let GPT-4o analyze your product images</List.Item>
+                  <List.Item><Text as="span" fontWeight="semibold">Generate AI alt text</Text> — Let AI analyze your product images</List.Item>
                   <List.Item><Text as="span" fontWeight="semibold">Review & apply</Text> — Review suggestions and apply with one click</List.Item>
                 </List>
                 <InlineStack gap="200" wrap={false}>

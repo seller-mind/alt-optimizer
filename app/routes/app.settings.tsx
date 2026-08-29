@@ -267,7 +267,7 @@ export default function SettingsPage() {
               </InlineStack>
               <InlineStack align="space-between">
                 <Text as="p" tone="subdued">AI Provider</Text>
-                <Badge tone="info">OpenAI GPT-4o</Badge>
+                <Badge tone="info">DeepSeek AI</Badge>
               </InlineStack>
               <InlineStack align="space-between">
                 <Text as="p" tone="subdued">App Version</Text>
