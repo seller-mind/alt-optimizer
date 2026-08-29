@@ -93,7 +93,7 @@ async function upsertProductImage(
         src: image.src,
         altTextOriginal: image.altText,
         tagsOriginal: tags.join(", "),
-        status: image.altText ? "approved" : "pending",
+        status: image.altText ? "applied" : "pending",
       },
     });
   }
