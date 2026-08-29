@@ -52,15 +52,18 @@ export async function fetchProducts(
             productType
             tags
             status
-            images(first: 10) {
-              edges {
-                node {
+            media(first: 50) {
+              nodes {
+                ... on MediaImage {
                   id
-                  url
-                  altText
-                  width
-                  height
+                  alt
+                  image {
+                    url
+                    width
+                    height
+                  }
                 }
+                mediaContentType
               }
             }
             variants(first: 5) {
@@ -100,13 +103,15 @@ export async function fetchProducts(
     productType: edge.node.productType || "",
     tags: edge.node.tags || [],
     status: edge.node.status,
-    images: edge.node.images.edges.map((img: any) => ({
-      id: img.node.id,
-      src: img.node.url,
-      altText: img.node.altText,
-      width: img.node.width,
-      height: img.node.height,
-    })),
+    images: edge.node.media.nodes
+      .filter((node: any) => node.mediaContentType === "IMAGE" && node.image)
+      .map((node: any) => ({
+        id: node.id,
+        src: node.image.url,
+        altText: node.alt ? node.alt : null,
+        width: node.image.width,
+        height: node.image.height,
+      })),
     variants: edge.node.variants.edges.map((v: any) => ({
       id: v.node.id,
       title: v.node.title,
