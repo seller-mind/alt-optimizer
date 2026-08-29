@@ -25,11 +25,27 @@ api_version = "2026-07"
 
   [[webhooks.subscriptions]]
   topics = ["app/uninstalled"]
-  uri = "/webhooks/app/uninstalled"
+  uri = "/webhooks"
+
+  [[webhooks.subscriptions]]
+  topics = ["customers/data_request"]
+  uri = "/webhooks"
+
+  [[webhooks.subscriptions]]
+  topics = ["customers/redact"]
+  uri = "/webhooks"
+
+  [[webhooks.subscriptions]]
+  topics = ["shop/redact"]
+  uri = "/webhooks"
 
   [[webhooks.subscriptions]]
   topics = ["app_subscriptions/update"]
-  uri = "/webhooks/app/subscriptions/update"
+  uri = "/webhooks"
+
+  [[webhooks.subscriptions]]
+  topics = ["app_subscriptions/decline"]
+  uri = "/webhooks"
 
 [pos]
 embedded = false

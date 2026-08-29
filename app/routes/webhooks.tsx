@@ -65,6 +65,11 @@ export async function action({ request }: ActionFunctionArgs) {
         await handleCustomersDataRequest(shopDomain, payload);
         break;
       }
+      case "customers/redact":
+      case "CUSTOMERS_REDACT": {
+        await handleCustomersRedact(shopDomain, payload);
+        break;
+      }
       case "app_subscriptions/update":
       case "APP_SUBSCRIPTIONS_UPDATE": {
         await handleSubscriptionUpdate(payload);
@@ -149,6 +154,18 @@ async function handleCustomersDataRequest(shopDomain: string, payload: any): Pro
     JSON.stringify({ shopDomain, customerId: payload.customer_id || "unknown" })
   );
   // We don't store any customer data, so nothing to return
+}
+
+/**
+ * CUSTOMERS_REDACT: GDPR customer data erasure request.
+ * We don't collect or store any customer personal data, so log for audit.
+ */
+async function handleCustomersRedact(shopDomain: string, payload: any): Promise<void> {
+  console.log(
+    `[Webhook] Customer redact for shop ${shopDomain}:`,
+    JSON.stringify({ shopDomain, customerId: payload.customer?.id || "unknown" })
+  );
+  // No customer personal data is stored, so nothing to delete
 }
 
 /**
