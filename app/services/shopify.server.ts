@@ -312,25 +312,34 @@ async function createJsonLdMetafieldDefinition(admin: any): Promise<void> {
 }
 
 /**
- * Inject JSON-LD snippet into the store's main theme via Theme Asset API.
+ * Inject JSON-LD snippet into the store's main theme via GraphQL Admin API.
  * Idempotent: creates snippet + injects render tag into theme.liquid only once.
- * This replaces the Theme App Extension approach — no CLI deploy needed.
+ * Fully API-driven — no CLI deploy needed by the merchant.
  */
 export async function injectJsonLdToTheme(admin: any): Promise<boolean> {
   try {
-    // 1. Get the published (main) theme
-    const themesResp = await admin.rest.resources.Theme.all({ status: "published" });
-    const mainTheme = themesResp.data?.[0];
+    // 1. Get the published (main) theme via GraphQL
+    const themesResp = await admin.graphql(
+      `{
+        themes(first: 5, roles: [PUBLISHED]) {
+          nodes {
+            id
+          }
+        }
+      }`
+    );
+    const themesData = await themesResp.json();
+    const mainTheme = themesData?.data?.themes?.nodes?.[0];
     if (!mainTheme?.id) {
       console.warn("[AltOptimizer] No published theme found");
       return false;
     }
-    const themeId = mainTheme.id;
+    const themeGid = mainTheme.id; // gid://shopify/Theme/xxxxx
 
-    // 2. Create/update the snippet file
-    const snippetKey = "snippets/alt-optimizer-jsonld.liquid";
+    // 2. Upsert the snippet file via themeFilesUpsert
+    const snippetFilename = "snippets/alt-optimizer-jsonld.liquid";
     const snippetContent = `{% comment %}
-AltOptimizer JSON-LD Structured Data — Auto-injected
+AltOptimizer JSON-LD Structured Data - Auto-injected
 Reads product-level JSON-LD from metafields and renders in page head.
 {% endcomment %}
 {% if product and product.metafields.altoptimizer.jsonld %}
@@ -339,39 +348,95 @@ Reads product-level JSON-LD from metafields and renders in page head.
 </script>
 {% endif %}`;
 
-    await admin.rest.resources.Asset.save({
-      theme_id: themeId,
-      asset: {
-        key: snippetKey,
-        value: snippetContent,
-      },
-    });
+    const upsertResp = await admin.graphql(
+      `mutation UpsertSnippet($themeId: ID!, $files: [ThemeFileInput!]!) {
+        themeFilesUpsert(themeId: $themeId, files: $files) {
+          themeFiles {
+            filename
+          }
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          themeId: themeGid,
+          files: [
+            {
+              filename: snippetFilename,
+              body: snippetContent,
+            },
+          ],
+        },
+      }
+    );
+    const upsertData = await upsertResp.json();
+    if (upsertData?.data?.themeFilesUpsert?.userErrors?.length > 0) {
+      console.warn("[AltOptimizer] Snippet upsert errors:", upsertData.data.themeFilesUpsert.userErrors);
+    }
 
     // 3. Read theme.liquid and inject render tag if not already present
-    const layoutKey = "layout/theme.liquid";
-    const assetResp = await admin.rest.resources.Asset.find({
-      theme_id: themeId,
-      key: layoutKey,
-    });
-    const themeLiquid = assetResp.data?.value || "";
+    const layoutFilename = "layout/theme.liquid";
+    const layoutResp = await admin.graphql(
+      `query GetThemeFile($themeId: ID!, $filename: String!) {
+        theme(id: $themeId) {
+          files(filenames: [$filename]) {
+            nodes {
+              body {
+                ... on OnlineStoreThemeFileBodyText {
+                  content
+                }
+              }
+            }
+          }
+        }
+      }`,
+      {
+        variables: {
+          themeId: themeGid,
+          filename: layoutFilename,
+        },
+      }
+    );
+    const layoutData = await layoutResp.json();
+    const themeLiquid =
+      layoutData?.data?.theme?.files?.nodes?.[0]?.body?.content || "";
 
     const renderTag = "{% render 'alt-optimizer-jsonld' %}";
-    if (!themeLiquid.includes(renderTag)) {
+    if (themeLiquid && !themeLiquid.includes(renderTag)) {
       // Insert before </head>
       const headCloseIdx = themeLiquid.indexOf("</head>");
       if (headCloseIdx !== -1) {
         const updated =
           themeLiquid.slice(0, headCloseIdx) +
-          `\n  <!-- AltOptimizer JSON-LD -->\n  ${renderTag}\n` +
+          `
+  <!-- AltOptimizer JSON-LD -->
+  ${renderTag}
+` +
           themeLiquid.slice(headCloseIdx);
 
-        await admin.rest.resources.Asset.save({
-          theme_id: themeId,
-          asset: {
-            key: layoutKey,
-            value: updated,
-          },
-        });
+        const updateResp = await admin.graphql(
+          `mutation UpdateLayout($themeId: ID!, $files: [ThemeFileInput!]!) {
+            themeFilesUpsert(themeId: $themeId, files: $files) {
+              themeFiles { filename }
+              userErrors { field message }
+            }
+          }`,
+          {
+            variables: {
+              themeId: themeGid,
+              files: [
+                {
+                  filename: layoutFilename,
+                  body: updated,
+                },
+              ],
+            },
+          }
+        );
+        const updateData = await updateResp.json();
+        if (updateData?.data?.themeFilesUpsert?.userErrors?.length > 0) {
+          console.warn("[AltOptimizer] Layout update errors:", updateData.data.themeFilesUpsert.userErrors);
+        }
       }
     }
 
