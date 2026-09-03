@@ -1,0 +1,10 @@
+api_version = "2025-01"
+
+[[extensions]]
+type = "theme"
+name = "t:name"
+handle = "alt-optimizer"
+
+  [[extensions.targeting]]
+  module = "./blocks/jsonld.liquid"
+  target = "section"

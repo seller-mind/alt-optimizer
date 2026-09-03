@@ -9,7 +9,7 @@ import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
-import { updateImageAltText, updateProductTags } from "~/services/shopify.server";
+import { updateImageAltText, updateProductTags, writeProductJsonLd } from "~/services/shopify.server";
 import { checkQuota, enforceQuota, incrementUsage, QuotaExceededError } from "~/services/billing.server";
 import { getOrCreateShop } from "~/utils/shop.server";
 
@@ -303,6 +303,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             hasJsonLd: true,
           },
         });
+
+        // Write JSON-LD to Shopify product metafield for storefront injection
+        try {
+          await writeProductJsonLd(admin, product.shopifyProductId, jsonLd);
+        } catch (metaErr) {
+          console.warn(`[AltOptimizer] Failed to write JSON-LD metafield for product ${productId}:`, metaErr);
+        }
+
         successCount++;
       } catch {
         // Continue with next product

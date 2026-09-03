@@ -220,3 +220,93 @@ export async function getProductCount(admin: any): Promise<number> {
   const data = await response.json();
   return data.data?.productsCount?.count || 0;
 }
+
+/**
+ * Write JSON-LD structured data to a product metafield.
+ * The metafield is then readable by the Theme App Extension block.
+ */
+export async function writeProductJsonLd(
+  admin: any,
+  productId: string,
+  jsonLdString: string
+): Promise<boolean> {
+  const response = await admin.graphql(
+    `mutation SetProductMetafield($productId: ID!, $jsonLd: String!) {
+      productUpdate(input: {
+        id: $productId,
+        metafields: [
+          {
+            namespace: "altoptimizer",
+            key: "jsonld",
+            value: $jsonLd,
+            type: "json"
+          }
+        ]
+      }) {
+        product { id }
+        userErrors { field message }
+      }
+    }`,
+    {
+      variables: {
+        productId,
+        jsonLd: jsonLdString,
+      },
+    }
+  );
+
+  const data = await response.json();
+  const errors = data.data?.productUpdate?.userErrors;
+
+  // If metafield definition doesn't exist yet, create it first
+  if (errors && errors.length > 0 && errors.some((e: any) => e.message?.includes("definition"))) {
+    await createJsonLdMetafieldDefinition(admin);
+    // Retry
+    const retryResponse = await admin.graphql(
+      `mutation SetProductMetafield($productId: ID!, $jsonLd: String!) {
+        productUpdate(input: {
+          id: $productId,
+          metafields: [
+            {
+              namespace: "altoptimizer",
+              key: "jsonld",
+              value: $jsonLd,
+              type: "json"
+            }
+          ]
+        }) {
+          product { id }
+          userErrors { field message }
+        }
+      }`,
+      { variables: { productId, jsonLd: jsonLdString } }
+    );
+    const retryData = await retryResponse.json();
+    const retryErrors = retryData.data?.productUpdate?.userErrors;
+    return !retryErrors || retryErrors.length === 0;
+  }
+
+  return !errors || errors.length === 0;
+}
+
+/**
+ * Create the metafield definition for altoptimizer.jsonld on Product.
+ */
+async function createJsonLdMetafieldDefinition(admin: any): Promise<void> {
+  await admin.graphql(
+    `mutation CreateMetafieldDefinition {
+      metafieldDefinitionCreate(ownerType: PRODUCT, definition: {
+        name: "AltOptimizer JSON-LD",
+        namespace: "altoptimizer",
+        key: "jsonld",
+        type: "json",
+        description: "JSON-LD structured data for SEO",
+        ownerType: PRODUCT,
+        pin: false
+      }) {
+        createdDefinition { id }
+        userErrors { field message }
+      }
+    }`
+  );
+}
