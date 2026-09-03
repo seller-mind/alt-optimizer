@@ -43,9 +43,9 @@ export function Boundary({ error: errorProp }: BoundaryProps) {
     } else if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("abort")) {
       title = "Request Timed Out";
       description = "The request took too long to complete. The AI service may be experiencing high load. Please try again.";
-    } else if (msg.includes("openai") || msg.includes("api key") || msg.includes("auth")) {
-      title = "AI Service Configuration Error";
-      description = "There's an issue with the AI service configuration. Please check your API key in Settings.";
+    } else if (msg.includes("api key") || msg.includes("configuration") || msg.includes("unauthorized") || msg.includes("auth")) {
+      title = "Service Configuration Error";
+      description = "There's an issue with the AI service. Please try again later or contact support if the problem persists.";
       showRetry = false;
     } else if (msg.includes("invalid image") || msg.includes("image format") || msg.includes("base64")) {
       title = "Invalid Image";
@@ -57,7 +57,7 @@ export function Boundary({ error: errorProp }: BoundaryProps) {
       title = "Data Not Found";
       description = "The requested data could not be found. It may have been deleted or not yet synced.";
     } else {
-      description = error.message;
+      description = "An unexpected error occurred. Please try again.";
     }
   }
 

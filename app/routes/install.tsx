@@ -1,15 +1,17 @@
 import { useState } from "react";
+import { randomBytes } from "crypto";
 
 const APP_URL = "https://alt-optimizer.vercel.app";
-const CLIENT_ID = "bf1b9b6eef0ca0ed0584705f23681ddd";
+const CLIENT_ID = process.env.SHOPIFY_API_KEY || "";
 const SCOPES = "read_products,write_products";
 const REDIRECT_URI = `${APP_URL}/auth/callback`;
+const STATE = typeof window !== "undefined" ? btoa(String(Math.random())) : "server";
 
 export default function InstallPage() {
   const [shop, setShop] = useState("haimo-dev");
 
   const installUrl = shop
-    ? `https://${shop}.myshopify.com/admin/oauth/authorize?client_id=${CLIENT_ID}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=random_state`
+    ? `https://${shop}.myshopify.com/admin/oauth/authorize?client_id=${CLIENT_ID}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${STATE}`
     : "";
 
   return (
@@ -76,12 +78,7 @@ export default function InstallPage() {
             This will redirect to Shopify to authorize the app.
             After approving permissions, you'll be redirected back to the dashboard.
           </p>
-          <details style={{ marginTop: 16 }}>
-            <summary style={{ cursor: "pointer", color: "#999", fontSize: 12 }}>Debug: OAuth URL</summary>
-            <pre style={{ fontSize: 11, color: "#666", wordBreak: "break-all", whiteSpace: "pre-wrap", marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 4 }}>
-              {installUrl}
-            </pre>
-          </details>
+          
         </div>
       )}
 

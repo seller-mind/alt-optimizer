@@ -22,7 +22,7 @@ export default function TermsPage() {
 
           <Text as="h3" variant="headingSm">2. Description of Service</Text>
           <Text as="p" variant="bodyMd">
-            AltOptimizer is a free AI-powered tool that generates SEO-optimized alt text, product tags, and JSON-LD structured data for Shopify product images. The App uses DeepSeek's AI API to analyze product images and generate descriptive content.
+            AltOptimizer is a free AI-powered tool that generates SEO-optimized alt text, product tags, and JSON-LD structured data for Shopify product images. The App uses advanced AI vision models to analyze product images and generate descriptive content.
           </Text>
 
           <Text as="h3" variant="headingSm">3. Free Service and Usage Limits</Text>
@@ -66,7 +66,7 @@ export default function TermsPage() {
 
           <Text as="h3" variant="headingSm">6. Data Handling</Text>
           <Text as="p" variant="bodyMd">
-            • Product images are sent to DeepSeek's API for AI analysis. See our Privacy Policy for details.
+            • Product images are sent to our AI service provider for analysis. See our Privacy Policy for details.
           </Text>
           <Text as="p" variant="bodyMd">
             • We implement reasonable security measures to protect your data

@@ -240,7 +240,7 @@ export default function SettingsPage() {
               </InlineStack>
               <InlineStack align="space-between">
                 <Text as="p" tone="subdued">AI Provider</Text>
-                <Badge tone="info">DeepSeek AI</Badge>
+                <Badge tone="info">AI Engine</Badge>
               </InlineStack>
               <InlineStack align="space-between">
                 <Text as="p" tone="subdued">App Version</Text>

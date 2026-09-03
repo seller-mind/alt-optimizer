@@ -1,5 +1,20 @@
 {
   "buildCommand": "npx prisma generate && (npx prisma db push --accept-data-loss || echo 'DB push skipped') && npx remix vite:build",
   "installCommand": "npm install --legacy-peer-deps",
-  "framework": "remix"
+  "framework": "remix",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ]
 }

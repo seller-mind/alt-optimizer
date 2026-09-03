@@ -51,7 +51,7 @@ export default function PrivacyPage() {
 
           <Text as="h3" variant="headingSm">3. How We Use Your Data</Text>
           <Text as="p" variant="bodyMd">
-            • Product images are sent to DeepSeek's AI API for image analysis to generate descriptive alt text
+            • Product images are sent to our secure AI service for image analysis to generate descriptive alt text
           </Text>
           <Text as="p" variant="bodyMd">
             • Product titles and descriptions are used to generate relevant tags and structured data
@@ -73,7 +73,7 @@ export default function PrivacyPage() {
 
           <Text as="h3" variant="headingSm">5. Data Sharing</Text>
           <Text as="p" variant="bodyMd">
-            • Product images are sent to DeepSeek's API (api.deepseek.com) for AI analysis. The API is used solely for generating alt text and related content.
+            • Product images are sent to our AI service provider for image analysis. The service is used solely for generating alt text and related content.
           </Text>
           <Text as="p" variant="bodyMd">
             • We do not sell, trade, or share your data with any other third parties

@@ -1,7 +1,7 @@
 import { LoaderFunctionArgs } from "@remix-run/node";
 
 const APP_URL = process.env.SHOPIFY_APP_URL || "https://alt-optimizer.vercel.app";
-const CLIENT_ID = process.env.SHOPIFY_API_KEY || "bf1b9b6eef0ca0ed0584705f23681ddd";
+const CLIENT_ID = process.env.SHOPIFY_API_KEY || "";
 const CLIENT_SECRET = process.env.SHOPIFY_API_SECRET || "";
 
 function redirectWithLog(url: string, reason: string) {

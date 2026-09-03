@@ -155,19 +155,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         const status = (err as any)?.status ?? null;
-        let friendlyError = message;
+        let friendlyError = "An unexpected error occurred. Please try again.";
         if (status === 429 || message.includes("429") || message.toLowerCase().includes("rate limit")) {
           friendlyError = `AI service rate limit hit (status ${status || "?"}). Please wait 1-2 minutes and try again.`;
         } else if (status === 401 || message.includes("401") || message.includes("API key")) {
-          friendlyError = `AI service API key invalid (status 401). Check your environment variables.`;
+          friendlyError = `AI service authentication failed. Please contact support.`;
         } else if (status === 413 || message.includes("too large") || message.includes("413")) {
           friendlyError = "Image too large for AI API. Try a smaller image.";
         } else if (message.includes("timeout") || message.includes("timed out")) {
           friendlyError = "Request timed out. The image may be too large or network is slow.";
         } else if (status === 400 || message.includes("400") || message.includes("invalid")) {
-          friendlyError = `Invalid request (status ${status || 400}): ${message}`;
+          friendlyError = "Invalid request. Please check the image and try again.";
         } else {
-          friendlyError = `AI API error (status ${status || "?"}): ${message}`;
+          friendlyError = "AI service error. Please try again later.";
         }
 
         return {

@@ -24,9 +24,9 @@ export function ErrorBoundary() {
     } else if (msg.includes("timeout") || msg.includes("timed out")) {
       title = "Request Timed Out";
       description = "The request took too long to complete. Please try again.";
-    } else if (msg.includes("openai") || msg.includes("api key")) {
-      title = "AI Service Configuration Error";
-      description = "There's an issue with the AI service configuration. Please check your API key in Settings.";
+    } else if (msg.includes("api key") || msg.includes("configuration") || msg.includes("unauthorized")) {
+      title = "Service Configuration Error";
+      description = "There's an issue with the AI service. Please try again later or contact support.";
       showRetry = false;
     } else if (msg.includes("invalid image") || msg.includes("image format")) {
       title = "Invalid Image";
