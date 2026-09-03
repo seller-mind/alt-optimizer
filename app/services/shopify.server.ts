@@ -310,3 +310,74 @@ async function createJsonLdMetafieldDefinition(admin: any): Promise<void> {
     }`
   );
 }
+
+/**
+ * Inject JSON-LD snippet into the store's main theme via Theme Asset API.
+ * Idempotent: creates snippet + injects render tag into theme.liquid only once.
+ * This replaces the Theme App Extension approach — no CLI deploy needed.
+ */
+export async function injectJsonLdToTheme(admin: any): Promise<boolean> {
+  try {
+    // 1. Get the published (main) theme
+    const themesResp = await admin.rest.resources.Theme.all({ status: "published" });
+    const mainTheme = themesResp.data?.[0];
+    if (!mainTheme?.id) {
+      console.warn("[AltOptimizer] No published theme found");
+      return false;
+    }
+    const themeId = mainTheme.id;
+
+    // 2. Create/update the snippet file
+    const snippetKey = "snippets/alt-optimizer-jsonld.liquid";
+    const snippetContent = `{% comment %}
+AltOptimizer JSON-LD Structured Data — Auto-injected
+Reads product-level JSON-LD from metafields and renders in page head.
+{% endcomment %}
+{% if product and product.metafields.altoptimizer.jsonld %}
+<script type="application/ld+json">
+{{ product.metafields.altoptimizer.jsonld.value }}
+</script>
+{% endif %}`;
+
+    await admin.rest.resources.Asset.save({
+      theme_id: themeId,
+      asset: {
+        key: snippetKey,
+        value: snippetContent,
+      },
+    });
+
+    // 3. Read theme.liquid and inject render tag if not already present
+    const layoutKey = "layout/theme.liquid";
+    const assetResp = await admin.rest.resources.Asset.find({
+      theme_id: themeId,
+      key: layoutKey,
+    });
+    const themeLiquid = assetResp.data?.value || "";
+
+    const renderTag = "{% render 'alt-optimizer-jsonld' %}";
+    if (!themeLiquid.includes(renderTag)) {
+      // Insert before </head>
+      const headCloseIdx = themeLiquid.indexOf("</head>");
+      if (headCloseIdx !== -1) {
+        const updated =
+          themeLiquid.slice(0, headCloseIdx) +
+          `\n  <!-- AltOptimizer JSON-LD -->\n  ${renderTag}\n` +
+          themeLiquid.slice(headCloseIdx);
+
+        await admin.rest.resources.Asset.save({
+          theme_id: themeId,
+          asset: {
+            key: layoutKey,
+            value: updated,
+          },
+        });
+      }
+    }
+
+    return true;
+  } catch (err) {
+    console.warn("[AltOptimizer] Theme injection failed:", err);
+    return false;
+  }
+}

@@ -9,7 +9,7 @@ import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
-import { updateImageAltText, updateProductTags, writeProductJsonLd } from "~/services/shopify.server";
+import { updateImageAltText, updateProductTags, writeProductJsonLd, injectJsonLdToTheme } from "~/services/shopify.server";
 import { checkQuota, enforceQuota, incrementUsage, QuotaExceededError } from "~/services/billing.server";
 import { getOrCreateShop } from "~/utils/shop.server";
 
@@ -319,6 +319,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (successCount > 0) {
       await incrementUsage(shop.id, "jsonld", successCount);
+      // Inject JSON-LD snippet into theme (idempotent, first time only)
+      try {
+        await injectJsonLdToTheme(admin);
+      } catch (themeErr) {
+        console.warn("[AltOptimizer] Theme injection skipped:", themeErr);
+      }
     }
 
     return json({ success: true, generated: successCount });
