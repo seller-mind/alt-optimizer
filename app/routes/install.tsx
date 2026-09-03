@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 
 const APP_URL = "https://alt-optimizer.vercel.app";
 const CLIENT_ID = process.env.SHOPIFY_API_KEY || "";
-const SCOPES = "read_products,write_products";
+const SCOPES = "read_products,write_products,read_themes,write_themes";
 const REDIRECT_URI = `${APP_URL}/auth/callback`;
 const STATE = typeof window !== "undefined" ? btoa(String(Math.random())) : "server";
 

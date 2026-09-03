@@ -12,6 +12,8 @@ const shopify = shopifyApp({
   apiSecretKey: process.env.SHOPIFY_API_SECRET,
   apiVersion: ApiVersion.July26,
   scopes: [
+    "read_themes",
+    "write_themes",
     "read_products",
     "write_products",
   ],

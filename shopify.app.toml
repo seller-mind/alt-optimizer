@@ -12,9 +12,7 @@ automatically_update_urls_on_dev = true
 
 [auth]
 redirect_urls = [
-  "https://alt-optimizer.vercel.app/auth/callback",
-  "https://alt-optimizer.vercel.app/auth/shopify/callback",
-  "https://alt-optimizer.vercel.app/auth"
+  "https://alt-optimizer.vercel.app/auth/callback"
 ]
 
 [access_scopes]
