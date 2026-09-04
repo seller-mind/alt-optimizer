@@ -18,7 +18,7 @@ const shopify = shopifyApp({
     "write_products",
   ],
   appUrl: process.env.SHOPIFY_APP_URL || "https://localhost:3000",
-  isEmbeddedApp: true,
+  isEmbeddedApp: false,
   appDistribution: AppDistribution.MultiTenant,
   sessionStorage: new PrismaSessionStorage(prisma),
   hooks: {
