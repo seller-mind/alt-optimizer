@@ -22,21 +22,38 @@ const shopify = shopifyApp({
   appDistribution: AppDistribution.MultiTenant,
   sessionStorage: new PrismaSessionStorage(prisma),
   future: {
+    unstable_newEmbeddedAuthStrategy: true,
     expiringOfflineAccessTokens: true,
   },
   hooks: {
     afterAuth: async ({ session }) => {
       const shop = session.shop;
-      console.log(`[AltOptimizer] afterAuth for shop: ${shop}, token expires: ${session.expires ? new Date(session.expires as any).toISOString() : "never"}`);
+      console.log(
+        `[AltOptimizer] afterAuth for shop: ${shop}, token expires: ${
+          session.expires ? new Date(session.expires as any).toISOString() : "never"
+        }`
+      );
 
       try {
         await prisma.shop.upsert({
           where: { shopDomain: shop },
-          update: { status: "active", accessToken: session.accessToken || undefined },
-          create: { shopDomain: shop, accessToken: session.accessToken || "", planType: "free", status: "active" },
+          update: {
+            status: "active",
+            accessToken: session.accessToken || undefined,
+          },
+          create: {
+            shopDomain: shop,
+            accessToken: session.accessToken || "",
+            planType: "free",
+            status: "active",
+          },
         });
+        console.log(`[AltOptimizer] Shop record upserted: ${shop}`);
       } catch (error: any) {
-        console.error("[AltOptimizer] afterAuth shop record error:", error.message);
+        console.error(
+          `[AltOptimizer] afterAuth shop record error:`,
+          error.message
+        );
       }
     },
   },
