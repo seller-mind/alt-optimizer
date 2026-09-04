@@ -24,10 +24,10 @@ const shopify = shopifyApp({
   hooks: {
     afterAuth: async ({ session }) => {
       const shop = session.shop;
-      console.log(`[AltOptimizer] afterAuth for shop: ${shop}, token expires: ${session.expires || "never"}`);
+      const sessionId = `offline_${shop}`;
+      console.log(`[AltOptimizer] afterAuth for shop: ${shop}, token expires: ${session.expires ? new Date(session.expires as any).toISOString() : "never"}`);
 
-      // Migrate non-expiring token to expiring token (required for public apps created after April 2026)
-      let tokenToStore = session.accessToken || "";
+      // Migrate non-expiring token to expiring token (required for Admin API since 2026)
       if (session.accessToken && !session.expires) {
         try {
           console.log(`[AltOptimizer] Migrating non-expiring token to expiring for ${shop}...`);
@@ -35,59 +35,93 @@ const shopify = shopifyApp({
             `https://${shop}/admin/oauth/access_token`,
             {
               method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                client_id: process.env.SHOPIFY_API_KEY || "",
-                client_secret: process.env.SHOPIFY_API_SECRET || "",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                client_id: process.env.SHOPIFY_API_KEY,
+                client_secret: process.env.SHOPIFY_API_SECRET,
                 grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
                 subject_token: session.accessToken,
                 subject_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
                 requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
-                expiring: "1",
+                expiring: 1,
               }),
             }
           );
-          const migrateData = await migrateResp.json();
-          if (migrateData.access_token) {
-            tokenToStore = migrateData.access_token;
-            console.log(`[AltOptimizer] Token migrated successfully. Expires in: ${migrateData.expires_in}s, has refresh_token: ${!!migrateData.refresh_token}`);
-            // Update session object so SDK also uses the new token
-            session.accessToken = migrateData.access_token;
-            if (migrateData.expires_in) {
-              session.expires = Math.floor(Date.now() / 1000) + migrateData.expires_in;
+
+          if (migrateResp.ok) {
+            const migrateData = await migrateResp.json();
+            if (migrateData.access_token) {
+              const expiresIn = migrateData.expires_in; // e.g. 3600
+              const expiresAt = new Date(Date.now() + expiresIn * 1000); // MUST be Date object
+
+              // CRITICAL: Update SDK session table directly — without this,
+              // the old (now-invalidated) token stays in DB → infinite redirect loop
+              await prisma.session.update({
+                where: { id: sessionId },
+                data: {
+                  accessToken: migrateData.access_token,
+                  expires: expiresAt,
+                },
+              });
+
+              // Also update in-memory session (SDK may save again after hook returns)
+              session.accessToken = migrateData.access_token;
+              session.expires = expiresAt;
+
+              // Update shops table
+              await prisma.shop.upsert({
+                where: { shopDomain: shop },
+                update: { accessToken: migrateData.access_token, status: "active" },
+                create: {
+                  shopDomain: shop,
+                  accessToken: migrateData.access_token,
+                  planType: "free",
+                  status: "active",
+                },
+              });
+
+              // Store refresh token (if column exists)
+              if (migrateData.refresh_token) {
+                try {
+                  await prisma.$executeRawUnsafe(
+                    `UPDATE shops SET refresh_token = $1 WHERE shop_domain = $2`,
+                    migrateData.refresh_token,
+                    shop
+                  );
+                } catch (_) { /* column may not exist yet */ }
+              }
+
+              console.log(`[AltOptimizer] Token migrated: expires in ${expiresIn}s, refresh_token: ${!!migrateData.refresh_token}`);
+              return;
+            } else {
+              console.error(`[AltOptimizer] Token migration failed:`, JSON.stringify(migrateData));
             }
           } else {
-            console.error(`[AltOptimizer] Token migration failed:`, JSON.stringify(migrateData));
+            const errBody = await migrateResp.text();
+            console.error(`[AltOptimizer] Token migration HTTP error: ${migrateResp.status} ${errBody.slice(0, 300)}`);
           }
-        } catch (migrateErr) {
-          console.error(`[AltOptimizer] Token migration error:`, migrateErr);
+        } catch (migrateErr: any) {
+          console.error(`[AltOptimizer] Token migration error:`, migrateErr.message);
         }
       }
 
+      // Normal shop record update (token already expiring, or migration failed)
       try {
-        const existing = await prisma.shop.findUnique({
+        await prisma.shop.upsert({
           where: { shopDomain: shop },
+          update: {
+            status: "active",
+            accessToken: session.accessToken || undefined,
+          },
+          create: {
+            shopDomain: shop,
+            accessToken: session.accessToken || "",
+            planType: "free",
+            status: "active",
+          },
         });
-        if (!existing) {
-          await prisma.shop.create({
-            data: {
-              shopDomain: shop,
-              accessToken: tokenToStore,
-              planType: "free",
-              status: "active",
-            },
-          });
-        } else {
-          await prisma.shop.update({
-            where: { shopDomain: shop },
-            data: {
-              status: "active",
-              accessToken: tokenToStore || existing.accessToken,
-            },
-          });
-        }
-      } catch (error) {
-        console.error("[AltOptimizer] afterAuth shop record error:", error);
+      } catch (error: any) {
+        console.error("[AltOptimizer] afterAuth shop record error:", error.message);
       }
     },
   },
