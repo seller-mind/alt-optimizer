@@ -52,46 +52,52 @@ const shopify = shopifyApp({
             const migrateData = await migrateResp.json();
             if (migrateData.access_token) {
               const expiresIn = migrateData.expires_in; // e.g. 3600
-              const expiresAt = new Date(Date.now() + expiresIn * 1000); // MUST be Date object
+              const expiresAt = new Date(Date.now() + expiresIn * 1000);
+              const newToken = migrateData.access_token;
+              const refreshToken = migrateData.refresh_token || null;
 
-              // CRITICAL: Update SDK session table directly — without this,
-              // the old (now-invalidated) token stays in DB → infinite redirect loop
-              await prisma.session.update({
-                where: { id: sessionId },
-                data: {
-                  accessToken: migrateData.access_token,
-                  expires: expiresAt,
-                },
-              });
+              // CRITICAL: The SDK saves the session AFTER afterAuth returns,
+              // which would overwrite our DB changes with the old non-expiring token.
+              // Use setTimeout to ensure our DB update runs AFTER the SDK's save.
+              console.log(`[AltOptimizer] Scheduling deferred DB update for session ${sessionId}`);
+              setTimeout(async () => {
+                try {
+                  // Overwrite the session record with the migrated expiring token
+                  await prisma.session.update({
+                    where: { id: sessionId },
+                    data: {
+                      accessToken: newToken,
+                      expires: expiresAt,
+                    },
+                  });
+                  console.log(`[AltOptimizer] Deferred session update done. Token now expires at ${expiresAt.toISOString()}`);
 
-              // Also update in-memory session (SDK may save again after hook returns)
-              session.accessToken = migrateData.access_token;
-              session.expires = expiresAt;
+                  // Verify by re-reading
+                  const verify = await prisma.session.findUnique({ where: { id: sessionId } });
+                  console.log(`[AltOptimizer] Verified session: expires=${verify?.expires?.toISOString()}, token=${verify?.accessToken?.substring(0, 15)}...`);
+                } catch (e: any) {
+                  console.error(`[AltOptimizer] Deferred session update failed:`, e.message);
+                }
+              }, 3000);
 
-              // Update shops table
+              // Update shops table (immediate — separate table, no conflict)
               await prisma.shop.upsert({
                 where: { shopDomain: shop },
-                update: { accessToken: migrateData.access_token, status: "active" },
-                create: {
-                  shopDomain: shop,
-                  accessToken: migrateData.access_token,
-                  planType: "free",
-                  status: "active",
-                },
+                update: { accessToken: newToken, status: "active" },
+                create: { shopDomain: shop, accessToken: newToken, planType: "free", status: "active" },
               });
 
-              // Store refresh token (if column exists)
-              if (migrateData.refresh_token) {
+              // Store refresh token if column exists
+              if (refreshToken) {
                 try {
                   await prisma.$executeRawUnsafe(
                     `UPDATE shops SET refresh_token = $1 WHERE shop_domain = $2`,
-                    migrateData.refresh_token,
-                    shop
+                    refreshToken, shop
                   );
                 } catch (_) { /* column may not exist yet */ }
               }
 
-              console.log(`[AltOptimizer] Token migrated: expires in ${expiresIn}s, refresh_token: ${!!migrateData.refresh_token}`);
+              console.log(`[AltOptimizer] Token migrated: expires in ${expiresIn}s, refresh_token: ${!!refreshToken}`);
               return;
             } else {
               console.error(`[AltOptimizer] Token migration failed:`, JSON.stringify(migrateData));
@@ -109,16 +115,8 @@ const shopify = shopifyApp({
       try {
         await prisma.shop.upsert({
           where: { shopDomain: shop },
-          update: {
-            status: "active",
-            accessToken: session.accessToken || undefined,
-          },
-          create: {
-            shopDomain: shop,
-            accessToken: session.accessToken || "",
-            planType: "free",
-            status: "active",
-          },
+          update: { status: "active", accessToken: session.accessToken || undefined },
+          create: { shopDomain: shop, accessToken: session.accessToken || "", planType: "free", status: "active" },
         });
       } catch (error: any) {
         console.error("[AltOptimizer] afterAuth shop record error:", error.message);
