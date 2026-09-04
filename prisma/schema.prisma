@@ -16,6 +16,13 @@ model Session {
   expires             DateTime?
   accessToken         String      @default("") @map("access_token")
   userId              BigInt?     @map("user_id")
+  firstName           String?     @map("first_name")
+  lastName            String?     @map("last_name")
+  email               String?
+  accountOwner        Boolean     @default(false) @map("account_owner")
+  locale              String?
+  collaborator        Boolean     @default(false)
+  emailVerified       Boolean     @default(false) @map("email_verified")
   refreshToken        String?     @map("refresh_token")
   refreshTokenExpires DateTime?   @map("refresh_token_expires")
 
