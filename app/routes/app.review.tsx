@@ -272,6 +272,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ success: false, error: "Unknown action", intent: "unknown" });
   } catch (err) {
     const message = err instanceof Error ? err.message : "An unexpected error occurred";
+    console.error("[AltOptimizer] Review action error:", message, err instanceof Error ? err.stack : "");
     return json({ success: false, error: message, intent });
   }
 };

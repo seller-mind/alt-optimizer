@@ -151,7 +151,13 @@ export async function updateImageAltText(
   );
 
   const data = await response.json();
+  if (data.errors) {
+    console.error("[AltOptimizer] GraphQL errors in updateImageAltText:", JSON.stringify(data.errors));
+  }
   const errors = data.data?.productUpdateMedia?.mediaUserErrors;
+  if (errors && errors.length > 0) {
+    console.error("[AltOptimizer] MediaUserErrors in updateImageAltText:", JSON.stringify(errors));
+  }
   return !errors || errors.length === 0;
 }
 

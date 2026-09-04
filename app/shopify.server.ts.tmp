@@ -20,12 +20,14 @@ const shopify = shopifyApp({
   appUrl: process.env.SHOPIFY_APP_URL || "https://localhost:3000",
   isEmbeddedApp: true,
   appDistribution: AppDistribution.MultiTenant,
+  // future: {
+  //   unstable_newEmbeddedAuthStrategy: true,  // REMOVED: incompatible with standard OAuth, requires managed install
+  // },
   sessionStorage: new PrismaSessionStorage(prisma),
   hooks: {
     afterAuth: async ({ session }) => {
       const shop = session.shop;
-      const tokenPrefix = session.accessToken?.substring(0, 10) || "none";
-      console.log(`[AltOptimizer] afterAuth for shop: ${shop}, token: ${tokenPrefix}..., expires: ${session.expires || "never"}`);
+      console.log(`[AltOptimizer] afterAuth for shop: ${shop}`);
       try {
         const existing = await prisma.shop.findUnique({
           where: { shopDomain: shop },
@@ -37,7 +39,7 @@ const shopify = shopifyApp({
               accessToken: session.accessToken || "",
               planType: "free",
               status: "active",
-            },
+            // },
           });
         } else {
           await prisma.shop.update({
@@ -45,32 +47,32 @@ const shopify = shopifyApp({
             data: {
               status: "active",
               accessToken: session.accessToken || existing.accessToken,
-            },
+            // },
           });
         }
       } catch (error) {
         console.error("[AltOptimizer] afterAuth shop record error:", error);
       }
-    },
-  },
+    // },
+  // },
   webhooks: {
     APP_UNINSTALLED: {
       deliveryMethod: "http",
       callbackUrl: "/webhooks",
-    },
+    // },
     CUSTOMERS_DATA_REQUEST: {
       deliveryMethod: "http",
       callbackUrl: "/webhooks",
-    },
+    // },
     CUSTOMERS_REDACT: {
       deliveryMethod: "http",
       callbackUrl: "/webhooks",
-    },
+    // },
     SHOP_REDACT: {
       deliveryMethod: "http",
       callbackUrl: "/webhooks",
-    },
-  },
+    // },
+  // },
 });
 
 export default shopify;
