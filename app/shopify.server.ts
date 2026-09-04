@@ -19,7 +19,7 @@ const shopify = shopifyApp({
   ],
   appUrl: process.env.SHOPIFY_APP_URL || "https://localhost:3000",
   isEmbeddedApp: true,
-  appDistribution: AppDistribution.MultiTenant,
+  appDistribution: AppDistribution.AppStore,
   sessionStorage: new PrismaSessionStorage(prisma),
   future: {
     unstable_newEmbeddedAuthStrategy: true,
