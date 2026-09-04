@@ -1,63 +1,65 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/react";
-import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 
+// Unauthenticated diagnostic endpoint — checks DB directly
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const results: Record<string, any> = {};
+  const url = new URL(request.url);
+  const shop = url.searchParams.get("shop") || "haimo-dev.myshopify.com";
 
-  // 1. Check session
+  // 1. Check ALL session records for this shop
   try {
-    const { session, admin } = await authenticate.admin(request);
-    results.session = {
-      shop: session.shop,
-      id: session.id,
-      isOnline: session.isOnline,
-      expires: session.expires ? new Date(session.expires * 1000).toISOString() : "never",
-      tokenPrefix: session.accessToken?.substring(0, 15) + "...",
-      tokenLength: session.accessToken?.length || 0,
-    };
-
-    // 2. Check DB session record
-    const dbSession = await prisma.session.findFirst({
-      where: { shop: session.shop },
+    const dbSessions = await prisma.session.findMany({
+      where: { shop },
     });
-    results.dbSession = dbSession ? {
-      id: dbSession.id,
-      shop: dbSession.shop,
-      expires: dbSession.expires,
-      tokenPrefix: dbSession.accessToken?.substring(0, 15) + "...",
-    } : null;
+    results.dbSessions = dbSessions.map((s) => ({
+      id: s.id,
+      shop: s.shop,
+      scope: s.scope,
+      isOnline: s.isOnline,
+      expires: s.expires ? s.expires.toISOString() : null,
+      expiresType: typeof s.expires,
+      accessTokenPrefix: s.accessToken?.substring(0, 20) + "...",
+      accessTokenLength: s.accessToken?.length || 0,
+    }));
+  } catch (e: any) {
+    results.dbSessionsError = e.message;
+  }
 
-    // 3. Check shops record
+  // 2. Check shops record
+  try {
     const shopRecord = await prisma.shop.findUnique({
-      where: { shopDomain: session.shop },
+      where: { shopDomain: shop },
     });
     results.shopRecord = shopRecord ? {
       domain: shopRecord.shopDomain,
       status: shopRecord.status,
-      tokenPrefix: shopRecord.accessToken?.substring(0, 15) + "...",
+      accessTokenPrefix: shopRecord.accessToken?.substring(0, 20) + "...",
     } : null;
+  } catch (e: any) {
+    results.shopRecordError = e.message;
+  }
 
-    // 4. Test Shopify API call
-    try {
-      const shopResp = await admin.graphql(`{ shop { name myshopifyDomain } }`);
-      const shopData = await shopResp.json();
+  // 3. Test API with shops token
+  try {
+    const shopRecord = await prisma.shop.findUnique({
+      where: { shopDomain: shop },
+    });
+    if (shopRecord?.accessToken) {
+      const resp = await fetch(`https://${shop}/admin/api/2026-07/shop.json`, {
+        headers: { "X-Shopify-Access-Token": shopRecord.accessToken },
+      });
       results.apiTest = {
-        success: !shopData.errors,
-        data: shopData.data,
-        errors: shopData.errors || null,
+        status: resp.status,
+        ok: resp.ok,
+        body: (await resp.text()).slice(0, 500),
       };
-    } catch (apiErr: any) {
-      results.apiTest = {
-        success: false,
-        error: apiErr.message,
-        status: apiErr.status || apiErr.response?.status,
-        body: apiErr.body || apiErr.response?.body,
-      };
+    } else {
+      results.apiTest = { error: "No access token in shops table" };
     }
-  } catch (authErr: any) {
-    results.authError = authErr.message;
+  } catch (e: any) {
+    results.apiTest = { error: e.message };
   }
 
   return json(results);
