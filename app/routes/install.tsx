@@ -8,7 +8,7 @@ const REDIRECT_URI = `${APP_URL}/auth/callback`;
 const STATE = typeof window !== "undefined" ? btoa(String(Math.random())) : "server";
 
 export default function InstallPage() {
-  const [shop, setShop] = useState("haimo-dev");
+  const [shop, setShop] = useState("");
 
   const installUrl = shop
     ? `https://${shop}.myshopify.com/admin/oauth/authorize?client_id=${CLIENT_ID}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${STATE}`

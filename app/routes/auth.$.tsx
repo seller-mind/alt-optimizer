@@ -10,18 +10,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (error instanceof Response) {
       throw error;
     }
-    // Return detailed error to browser for diagnosis
+    // Log full details server-side only
     console.error("[AltOptimizer] Auth callback error:", {
       name: error?.name,
       message: error?.message,
-      stack: error?.stack?.split("\n").slice(0, 5).join("\n"),
     });
+    // Return generic error to client - never leak stack traces
     return new Response(
       JSON.stringify({
         error: "AUTH_CALLBACK_FAILED",
-        name: error?.name || "Unknown",
-        message: error?.message || String(error),
-        stack: error?.stack?.split("\n").slice(0, 8).join("\n"),
+        message: "Authentication failed. Please try installing the app again.",
       }),
       {
         status: 500,

@@ -96,3 +96,7 @@ logs/
 .codegraph
 .env*
 _tmp_*
+
+# Test files with potential credentials
+sync_test.ts
+*_test.ts
