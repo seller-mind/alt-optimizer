@@ -51,6 +51,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "restore") {
     const backupId = parseInt(formData.get("backupId") as string, 10);
+    if (isNaN(backupId)) {
+      return json({ success: false, message: "Invalid backup ID." });
+    }
     const result = await restoreBackup(shop.id, backupId);
     return json({
       success: result.success,
@@ -60,6 +63,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "delete") {
     const backupId = parseInt(formData.get("backupId") as string, 10);
+    if (isNaN(backupId)) {
+      return json({ success: false, message: "Invalid backup ID." });
+    }
     await deleteBackup(shop.id, backupId);
     return json({ success: true, message: "Backup deleted." });
   }

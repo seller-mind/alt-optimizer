@@ -166,14 +166,9 @@ export async function updateProductTags(
   productId: string,
   tags: string[]
 ): Promise<boolean> {
-  const tagsString = tags.map((t) => `"${t.replace(/"/g, '\\"')}"`).join(", ");
-
-  const response = await admin.graphql(`
-    mutation {
-      productUpdate(input: {
-        id: "${productId}",
-        tags: [${tagsString}]
-      }) {
+  const response = await admin.graphql(
+    `mutation productUpdateTags($input: ProductInput!) {
+      productUpdate(input: $input) {
         product {
           id
           tags
@@ -183,8 +178,16 @@ export async function updateProductTags(
           message
         }
       }
+    }`,
+    {
+      variables: {
+        input: {
+          id: productId,
+          tags: tags,
+        },
+      },
     }
-  `);
+  );
 
   const data = await response.json();
   const errors = data.data?.productUpdate?.userErrors;
