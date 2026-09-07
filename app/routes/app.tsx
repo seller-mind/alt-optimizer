@@ -36,40 +36,22 @@ export function ErrorBoundary() {
     // Fall through to our custom handler
   }
 
-  // Custom error display for non-Response errors
-  const errorMessage = error instanceof Error
-    ? `${error.name}: ${error.message}`
-    : typeof error === "string"
-      ? error
-      : JSON.stringify(error);
-
-  const errorStack = error instanceof Error ? error.stack : undefined;
+  // Log error details server-side only — never expose internals to users
+  console.error("[AltOptimizer] ErrorBoundary caught:", error);
 
   return (
     <Box padding="600">
       <Card>
         <BlockStack gap="400">
           <Text as="h1" variant="headingLg" tone="critical">
-            Application Error
+            Something went wrong
           </Text>
           <Text as="p" variant="bodyMd">
-            Something went wrong. Please try refreshing the page.
+            An unexpected error occurred. Please try refreshing the page.
           </Text>
-          <Box padding="300" borderRadius="200" background="bg-surface-secondary">
-            <BlockStack gap="200">
-              <Text as="p" variant="bodySm" fontWeight="semibold" tone="critical">
-                Error Details:
-              </Text>
-              <Text as="p" variant="bodySm" monospace>
-                {errorMessage}
-              </Text>
-              {errorStack && (
-                <Text as="p" variant="bodyXs" monospace tone="subdued">
-                  {errorStack.split("\n").slice(0, 5).join("\n")}
-                </Text>
-              )}
-            </BlockStack>
-          </Box>
+          <Text as="p" variant="bodySm" tone="subdued">
+            If the problem persists, contact support through the Shopify App Store.
+          </Text>
         </BlockStack>
       </Card>
     </Box>
