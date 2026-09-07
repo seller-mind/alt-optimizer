@@ -1,17 +1,24 @@
 import { useState } from "react";
-import { randomBytes } from "crypto";
+import { useLoaderData } from "@remix-run/react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
 
 const APP_URL = "https://alt-optimizer.vercel.app";
-const CLIENT_ID = process.env.SHOPIFY_API_KEY || "";
 const SCOPES = "read_products,write_products,read_themes,write_themes";
 const REDIRECT_URI = `${APP_URL}/auth/callback`;
-const STATE = typeof window !== "undefined" ? btoa(String(Math.random())) : "server";
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  return json({
+    clientId: process.env.SHOPIFY_API_KEY || "",
+  });
+}
 
 export default function InstallPage() {
+  const { clientId } = useLoaderData<{ clientId: string }>();
   const [shop, setShop] = useState("");
 
   const installUrl = shop
-    ? `https://${shop}.myshopify.com/admin/oauth/authorize?client_id=${CLIENT_ID}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${STATE}`
+    ? `https://${shop}.myshopify.com/admin/oauth/authorize?client_id=${clientId}&scope=${SCOPES}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&state=${btoa(String(Math.random()))}`
     : "";
 
   return (
