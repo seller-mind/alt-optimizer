@@ -246,26 +246,25 @@ export async function writeProductJsonLd(
   jsonLdString: string
 ): Promise<boolean> {
   const response = await admin.graphql(
-    `mutation SetProductMetafield($productId: ID!, $jsonLd: String!) {
-      productUpdate(input: {
-        id: $productId,
-        metafields: [
-          {
-            namespace: "altoptimizer",
-            key: "jsonld",
-            value: $jsonLd,
-            type: "json"
-          }
-        ]
-      }) {
+    `mutation SetProductMetafield($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
         product { id }
         userErrors { field message }
       }
     }`,
     {
       variables: {
-        productId,
-        jsonLd: jsonLdString,
+        product: {
+          id: productId,
+          metafields: [
+            {
+              namespace: "altoptimizer",
+              key: "jsonld",
+              value: jsonLdString,
+              type: "json",
+            },
+          ],
+        },
       },
     }
   );
@@ -273,28 +272,36 @@ export async function writeProductJsonLd(
   const data = await response.json();
   const errors = data.data?.productUpdate?.userErrors;
 
+  if (errors && errors.length > 0) {
+    console.error("[writeProductJsonLd] userErrors:", JSON.stringify(errors, null, 2));
+  }
+
   // If metafield definition doesn't exist yet, create it first
   if (errors && errors.length > 0 && errors.some((e: any) => e.message?.includes("definition"))) {
     await createJsonLdMetafieldDefinition(admin);
     // Retry
     const retryResponse = await admin.graphql(
-      `mutation SetProductMetafield($productId: ID!, $jsonLd: String!) {
-        productUpdate(input: {
-          id: $productId,
-          metafields: [
-            {
-              namespace: "altoptimizer",
-              key: "jsonld",
-              value: $jsonLd,
-              type: "json"
-            }
-          ]
-        }) {
+      `mutation SetProductMetafield($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
           product { id }
           userErrors { field message }
         }
       }`,
-      { variables: { productId, jsonLd: jsonLdString } }
+      {
+        variables: {
+          product: {
+            id: productId,
+            metafields: [
+              {
+                namespace: "altoptimizer",
+                key: "jsonld",
+                value: jsonLdString,
+                type: "json",
+              },
+            ],
+          },
+        },
+      }
     );
     const retryData = await retryResponse.json();
     const retryErrors = retryData.data?.productUpdate?.userErrors;
