@@ -167,8 +167,8 @@ export async function updateProductTags(
   tags: string[]
 ): Promise<boolean> {
   const response = await admin.graphql(
-    `mutation productUpdateTags($input: ProductInput!) {
-      productUpdate(input: $input) {
+    `mutation UpdateProductTags($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
         product {
           id
           tags
@@ -181,7 +181,7 @@ export async function updateProductTags(
     }`,
     {
       variables: {
-        input: {
+        product: {
           id: productId,
           tags: tags,
         },
@@ -190,7 +190,13 @@ export async function updateProductTags(
   );
 
   const data = await response.json();
+  if (data.errors) {
+    console.error("[AltOptimizer] GraphQL errors in updateProductTags:", JSON.stringify(data.errors));
+  }
   const errors = data.data?.productUpdate?.userErrors;
+  if (errors && errors.length > 0) {
+    console.error("[AltOptimizer] UserErrors in updateProductTags:", JSON.stringify(errors));
+  }
   return !errors || errors.length === 0;
 }
 
@@ -358,9 +364,9 @@ Reads product-level JSON-LD from metafields and renders in page head.
 {% endif %}`;
 
     const upsertResp = await admin.graphql(
-      `mutation UpsertSnippet($themeId: ID!, $files: [ThemeFileInput!]!) {
+      `mutation UpsertSnippet($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
         themeFilesUpsert(themeId: $themeId, files: $files) {
-          themeFiles {
+          upsertedThemeFiles {
             filename
           }
           userErrors { field message }
@@ -372,7 +378,10 @@ Reads product-level JSON-LD from metafields and renders in page head.
           files: [
             {
               filename: snippetFilename,
-              body: snippetContent,
+              body: {
+                type: "TEXT",
+                value: snippetContent,
+              },
             },
           ],
         },
@@ -424,9 +433,9 @@ Reads product-level JSON-LD from metafields and renders in page head.
           themeLiquid.slice(headCloseIdx);
 
         const updateResp = await admin.graphql(
-          `mutation UpdateLayout($themeId: ID!, $files: [ThemeFileInput!]!) {
+          `mutation UpdateLayout($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
             themeFilesUpsert(themeId: $themeId, files: $files) {
-              themeFiles { filename }
+              upsertedThemeFiles { filename }
               userErrors { field message }
             }
           }`,
@@ -436,7 +445,10 @@ Reads product-level JSON-LD from metafields and renders in page head.
               files: [
                 {
                   filename: layoutFilename,
-                  body: updated,
+                  body: {
+                    type: "TEXT",
+                    value: updated,
+                  },
                 },
               ],
             },

@@ -241,6 +241,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           data: { tagsAi: tagResult.tags.join(", ") },
         });
 
+        // Sync generated tags to Shopify product
+        try {
+          await updateProductTags(admin, product.shopifyProductId, tagResult.tags);
+        } catch (tagErr) {
+          console.warn(`[AltOptimizer] Failed to sync tags to Shopify for product ${productId}:`, tagErr);
+        }
+
         results.push({
           productId,
           productTitle: product.title,
