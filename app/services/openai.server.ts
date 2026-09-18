@@ -113,7 +113,7 @@ export async function analyzeImage(
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response = await client.chat.completions.create({
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         messages: [
           { role: "system", content: ALT_TEXT_SYSTEM_PROMPT },
           {
@@ -203,7 +203,7 @@ ${localeInstruction}`;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response = await client.chat.completions.create({
-        model: "deepseek-v4-flash-vision-exp",
+        model: "deepseek-flash",
         messages: [
           { role: "system", content: TAGS_SYSTEM_PROMPT },
           {
