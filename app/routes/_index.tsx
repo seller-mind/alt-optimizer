@@ -3,6 +3,10 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
-  const query = url.search;
-  return redirect(`/app${query}`);
+  const shop = url.searchParams.get("shop");
+  if (shop) {
+    return redirect(`/auth/login?shop=${encodeURIComponent(shop)}`);
+  }
+  // No shop parameter — redirect to install page for (re)installation
+  return redirect("/install");
 };
