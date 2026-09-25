@@ -167,8 +167,8 @@ export async function updateProductTags(
   tags: string[]
 ): Promise<boolean> {
   const response = await admin.graphql(
-    `mutation productUpdateTags($input: ProductInput!) {
-      productUpdate(input: $input) {
+    `mutation UpdateProductTags($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
         product {
           id
           tags
@@ -181,7 +181,7 @@ export async function updateProductTags(
     }`,
     {
       variables: {
-        input: {
+        product: {
           id: productId,
           tags: tags,
         },
@@ -190,7 +190,13 @@ export async function updateProductTags(
   );
 
   const data = await response.json();
+  if (data.errors) {
+    console.error("[AltOptimizer] GraphQL errors in updateProductTags:", JSON.stringify(data.errors));
+  }
   const errors = data.data?.productUpdate?.userErrors;
+  if (errors && errors.length > 0) {
+    console.error("[AltOptimizer] UserErrors in updateProductTags:", JSON.stringify(errors));
+  }
   return !errors || errors.length === 0;
 }
 
@@ -240,26 +246,25 @@ export async function writeProductJsonLd(
   jsonLdString: string
 ): Promise<boolean> {
   const response = await admin.graphql(
-    `mutation SetProductMetafield($productId: ID!, $jsonLd: String!) {
-      productUpdate(input: {
-        id: $productId,
-        metafields: [
-          {
-            namespace: "altoptimizer",
-            key: "jsonld",
-            value: $jsonLd,
-            type: "json"
-          }
-        ]
-      }) {
+    `mutation SetProductMetafield($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
         product { id }
         userErrors { field message }
       }
     }`,
     {
       variables: {
-        productId,
-        jsonLd: jsonLdString,
+        product: {
+          id: productId,
+          metafields: [
+            {
+              namespace: "altoptimizer",
+              key: "jsonld",
+              value: jsonLdString,
+              type: "json",
+            },
+          ],
+        },
       },
     }
   );
@@ -267,28 +272,36 @@ export async function writeProductJsonLd(
   const data = await response.json();
   const errors = data.data?.productUpdate?.userErrors;
 
+  if (errors && errors.length > 0) {
+    console.error("[writeProductJsonLd] userErrors:", JSON.stringify(errors, null, 2));
+  }
+
   // If metafield definition doesn't exist yet, create it first
   if (errors && errors.length > 0 && errors.some((e: any) => e.message?.includes("definition"))) {
     await createJsonLdMetafieldDefinition(admin);
     // Retry
     const retryResponse = await admin.graphql(
-      `mutation SetProductMetafield($productId: ID!, $jsonLd: String!) {
-        productUpdate(input: {
-          id: $productId,
-          metafields: [
-            {
-              namespace: "altoptimizer",
-              key: "jsonld",
-              value: $jsonLd,
-              type: "json"
-            }
-          ]
-        }) {
+      `mutation SetProductMetafield($product: ProductUpdateInput!) {
+        productUpdate(product: $product) {
           product { id }
           userErrors { field message }
         }
       }`,
-      { variables: { productId, jsonLd: jsonLdString } }
+      {
+        variables: {
+          product: {
+            id: productId,
+            metafields: [
+              {
+                namespace: "altoptimizer",
+                key: "jsonld",
+                value: jsonLdString,
+                type: "json",
+              },
+            ],
+          },
+        },
+      }
     );
     const retryData = await retryResponse.json();
     const retryErrors = retryData.data?.productUpdate?.userErrors;
@@ -358,9 +371,9 @@ Reads product-level JSON-LD from metafields and renders in page head.
 {% endif %}`;
 
     const upsertResp = await admin.graphql(
-      `mutation UpsertSnippet($themeId: ID!, $files: [ThemeFileInput!]!) {
+      `mutation UpsertSnippet($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
         themeFilesUpsert(themeId: $themeId, files: $files) {
-          themeFiles {
+          upsertedThemeFiles {
             filename
           }
           userErrors { field message }
@@ -372,7 +385,10 @@ Reads product-level JSON-LD from metafields and renders in page head.
           files: [
             {
               filename: snippetFilename,
-              body: snippetContent,
+              body: {
+                type: "TEXT",
+                value: snippetContent,
+              },
             },
           ],
         },
@@ -424,9 +440,9 @@ Reads product-level JSON-LD from metafields and renders in page head.
           themeLiquid.slice(headCloseIdx);
 
         const updateResp = await admin.graphql(
-          `mutation UpdateLayout($themeId: ID!, $files: [ThemeFileInput!]!) {
+          `mutation UpdateLayout($themeId: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
             themeFilesUpsert(themeId: $themeId, files: $files) {
-              themeFiles { filename }
+              upsertedThemeFiles { filename }
               userErrors { field message }
             }
           }`,
@@ -436,7 +452,10 @@ Reads product-level JSON-LD from metafields and renders in page head.
               files: [
                 {
                   filename: layoutFilename,
-                  body: updated,
+                  body: {
+                    type: "TEXT",
+                    value: updated,
+                  },
                 },
               ],
             },

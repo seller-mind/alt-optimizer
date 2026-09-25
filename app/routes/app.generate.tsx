@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, useLoaderData, useActionData, useSubmit, useNavigation } from "@remix-run/react";
+import { json } from "@remix-run/node";
+import { useLoaderData, useActionData, useSubmit, useNavigation } from "@remix-run/react";
 import {
   Page, Layout, Card, Text, Button, BlockStack, InlineStack,
   Select, Banner, ProgressBar, Badge, Thumbnail, IndexTable,
@@ -226,6 +227,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           where: { productId },
           data: { tagsAi: tagResult.tags.join(", ") },
         });
+
+        // Sync generated tags to Shopify product
+        try {
+          await updateProductTags(admin, product.shopifyProductId, tagResult.tags);
+        } catch (tagErr) {
+          console.warn(`[AltOptimizer] Failed to sync tags to Shopify for product ${productId}:`, tagErr);
+        }
 
         results.push({
           productId,

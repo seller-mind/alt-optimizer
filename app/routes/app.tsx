@@ -28,15 +28,23 @@ export default function AppLayout() {
 export function ErrorBoundary() {
   const error = useRouteError();
 
-  // Try SDK boundary first (handles ErrorResponse types)
+  // Handle Shopify SDK errors (401/403) — triggers re-auth in embedded apps
   try {
     return boundary.error(error);
   } catch {
-    // boundary.error() re-throws non-ErrorResponse errors
-    // Fall through to our custom handler
+    // boundary.error() re-throws non-ErrorResponse errors — fall through
   }
 
-  // Log error details server-side only — never expose internals to users
+  // Handle 410 Gone (expired offline access tokens) — redirect to re-auth
+  const err = error as { status?: number; data?: { shop?: string } };
+  if (err?.status === 410) {
+    const shop = err?.data?.shop || "";
+    if (typeof window !== "undefined") {
+      // Always use window.top to break out of iframe if embedded
+      window.top.location.href = `/auth/login?shop=${encodeURIComponent(shop)}`;
+    }
+  }
+
   console.error("[AltOptimizer] ErrorBoundary caught:", error);
 
   return (
