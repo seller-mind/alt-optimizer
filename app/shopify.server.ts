@@ -29,23 +29,16 @@ const shopify = shopifyApp({
     afterAuth: async ({ session }) => {
       const shop = session.shop;
       console.log(
-        `[AltOptimizer] afterAuth for shop: ${shop}, token expires: ${
-          session.expires ? new Date(session.expires as any).toISOString() : "never"
-        }`
+        `[AltOptimizer] afterAuth for shop: ${shop}, online: ${session.isOnline}`
       );
 
       try {
         await prisma.shop.upsert({
           where: { shopDomain: shop },
-          update: {
-            status: "active",
-            accessToken: session.accessToken || undefined,
-          },
+          update: {},
           create: {
             shopDomain: shop,
-            accessToken: session.accessToken || "",
             planType: "free",
-            status: "active",
           },
         });
         console.log(`[AltOptimizer] Shop record upserted: ${shop}`);

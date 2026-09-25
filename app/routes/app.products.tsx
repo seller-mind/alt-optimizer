@@ -12,7 +12,7 @@ import {
   Select,
   Thumbnail,
   IndexTable,
-  useIndexResourceState,
+
   EmptyState,
   SkeletonBodyText,
   Banner,
@@ -62,7 +62,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     products: products.map((p) => ({
-      id: p.id,
+      id: String(p.id),
       shopifyProductId: p.shopifyProductId,
       title: p.title,
       handle: p.handle,
@@ -136,7 +136,19 @@ export default function ProductsPage() {
     submit(formData, { method: "post" });
   }, [submit]);
 
-  const selectedResources = useIndexResourceState(products);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const handleSelectionChange = useCallback((
+    newSelectedResources: string[],
+    _allSelected: boolean,
+    _selectionChanged: string[],
+    _allPageItemsSelected: boolean,
+  ) => {
+    setSelectedIds(new Set(newSelectedResources));
+  }, []);
+
+  const selectedCount = selectedIds.size;
+  const allSelected = products.length > 0 && selectedCount === products.length;
 
   /** Truncate long product titles with ellipsis */
   const truncateTitle = (title: string, maxLen: number = 50): string => {
@@ -278,11 +290,7 @@ export default function ProductsPage() {
                   <IndexTable
                     resourceName={{ singular: "product", plural: "products" }}
                     itemCount={products.length}
-                    selectedItemsCount={
-                      selectedResources.selectedItemsCount === "All"
-                        ? "All"
-                        : selectedResources.selectedResources.length
-                    }
+                    selectedItemsCount={allSelected ? "All" : selectedCount}
                     headings={[
                       { title: "Image" },
                       { title: "Product" },
@@ -290,7 +298,7 @@ export default function ProductsPage() {
                       { title: "Alt Status" },
                       { title: "JSON-LD" },
                     ]}
-                    {...selectedResources}
+                    onSelectionChange={handleSelectionChange}
                   >
                     {products.map((product, index) => {
                       const altStatus = product.imageCount === 0
@@ -303,9 +311,9 @@ export default function ProductsPage() {
 
                       return (
                         <IndexTable.Row
-                          id={String(product.id)}
+                          id={product.id}
                           key={product.id}
-                          selected={selectedResources.selectedResources.includes(String(product.id))}
+                          selected={selectedIds.has(product.id)}
                           position={index}
                         >
                           <IndexTable.Cell>

@@ -3,7 +3,7 @@ import { json, useLoaderData, useActionData, useSubmit, useNavigation } from "@r
 import {
   Page, Layout, Card, Text, Button, BlockStack, InlineStack,
   Select, Banner, ProgressBar, Badge, Thumbnail, IndexTable,
-  useIndexResourceState, FormLayout, ChoiceList, List, Modal,
+  FormLayout, ChoiceList, List, Modal,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
@@ -22,24 +22,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const products = await prisma.product.findMany({
     where: {
       shopId: shop.id,
-      images: {
-        some: {
-          OR: [
-            { altTextOriginal: null },
-            { status: "pending" },
-          ],
-        },
-      },
+      imageCount: { gt: 0 },
     },
     include: {
-      images: {
-        where: {
-          OR: [
-            { altTextOriginal: null },
-            { status: "pending" },
-          ],
-        },
-      },
+      images: true,
     },
     orderBy: { title: "asc" },
     take: 50,
@@ -55,6 +41,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         src: img.src,
         altTextOriginal: img.altTextOriginal,
         shopifyImageId: img.shopifyImageId,
+        needsGeneration: !img.altTextOriginal || img.status === "pending",
       })),
     })),
     quota,
@@ -344,8 +331,14 @@ export default function GeneratePage() {
   const [autoApply, setAutoApply] = useState<string>("false");
   const [showQuotaInfoModal, setShowQuotaInfoModal] = useState(false);
 
-  const allImageIds = products.flatMap((p) => p.images.map((img) => String(img.id)));
-  const selectedResources = useIndexResourceState(products);
+  const allImageIds = products.flatMap((p) => p.images.filter(img => img.needsGeneration).map((img) => String(img.id)));
+  const eligibleCount = products.reduce((sum, p) => sum + p.images.filter(img => img.needsGeneration).length, 0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const handleSelectionChange = useCallback((newSelectedResources: string[]) => {
+    setSelectedIds(new Set(newSelectedResources));
+  }, []);
+  const selectedCount = selectedIds.size;
+  const allSelected = products.length > 0 && selectedCount === products.length;
 
   // Show quota info modal when quota exceeded
   const showQuotaModal = actionData && !actionData.success && (actionData as any).quotaExceeded;
@@ -356,17 +349,17 @@ export default function GeneratePage() {
     formData.set("autoApply", autoApply);
 
     if (generationType === "alt_text") {
-      const selectedImageIds = selectedResources.selectedResources.length > 0
+      const selectedImageIds = selectedIds.size > 0
         ? products
-            .filter((p) => selectedResources.selectedResources.includes(String(p.id)))
-            .flatMap((p) => p.images.map((img) => String(img.id)))
+            .filter((p) => selectedIds.has(String(p.id)))
+            .flatMap((p) => p.images.filter(img => img.needsGeneration).map((img) => String(img.id)))
         : allImageIds;
 
       if (selectedImageIds.length === 0) return;
       selectedImageIds.forEach((id) => formData.append("imageIds", id));
     } else {
-      const selectedProductIds = selectedResources.selectedResources.length > 0
-        ? selectedResources.selectedResources
+      const selectedProductIds = selectedIds.size > 0
+        ? Array.from(selectedIds)
         : products.map((p) => String(p.id));
 
       if (selectedProductIds.length === 0) return;
@@ -374,7 +367,7 @@ export default function GeneratePage() {
     }
 
     submit(formData, { method: "post" });
-  }, [generationType, autoApply, selectedResources.selectedResources, products, allImageIds, submit]);
+  }, [generationType, autoApply, selectedIds, products, allImageIds, submit]);
 
   return (
     <Page title="AI Generation" subtitle="Generate alt text, tags, and structured data">
@@ -498,12 +491,12 @@ export default function GeneratePage() {
 
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    {products.length} products eligible for generation
+                    {eligibleCount} images need generation across {products.length} products
                   </Text>
                   <Button
                     variant="primary"
                     onClick={handleGenerate}
-                    disabled={isGenerating || products.length === 0 || quota.remaining <= 0}
+                    disabled={isGenerating || eligibleCount === 0 || quota.remaining <= 0}
                     loading={isGenerating}
                   >
                     {isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`}
@@ -524,26 +517,30 @@ export default function GeneratePage() {
 
               {products.length === 0 ? (
                 <Text as="p" alignment="center">
-                  All products have alt text. No generation needed.
+                  No products synced yet. Go to Products page and sync from Shopify.
+                </Text>
+              ) : eligibleCount === 0 ? (
+                <Text as="p" alignment="center">
+                  All {products.length} products already have alt text. No generation needed.
                 </Text>
               ) : (
                 <>
                   <IndexTable
                     resourceName={{ singular: "product", plural: "products" }}
                     itemCount={products.length}
-                    selectedItemsCount={selectedResources.selectedItemsCount}
+                    selectedItemsCount={allSelected ? "All" : selectedCount}
                     headings={[
                       { title: "Image" },
                       { title: "Product" },
-                      { title: "Images Needing Alt" },
+                      { title: "Status" },
                     ]}
-                    {...selectedResources}
+                    onSelectionChange={handleSelectionChange}
                   >
                     {products.map((product, index) => (
                       <IndexTable.Row
                         id={String(product.id)}
                         key={product.id}
-                        selected={selectedResources.selectedResources.includes(String(product.id))}
+                        selected={selectedIds.has(String(product.id))}
                         position={index}
                       >
                         <IndexTable.Cell>
@@ -558,7 +555,11 @@ export default function GeneratePage() {
                           <Text as="p" variant="bodySm" tone="subdued">/{product.handle}</Text>
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Badge>{product.images.length} images</Badge>
+                          <Badge tone={product.images.filter(img => img.needsGeneration).length > 0 ? "attention" : "success"}>
+                            {product.images.filter(img => img.needsGeneration).length > 0
+                              ? `${product.images.filter(img => img.needsGeneration).length} need generation`
+                              : "Complete"}
+                          </Badge>
                         </IndexTable.Cell>
                       </IndexTable.Row>
                     ))}
