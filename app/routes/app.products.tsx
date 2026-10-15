@@ -13,7 +13,7 @@ import {
   Select,
   Thumbnail,
   IndexTable,
-
+  BulkActions,
   EmptyState,
   SkeletonBodyText,
   Banner,
@@ -132,6 +132,7 @@ export default function ProductsPage() {
   );
 
   const handleSync = useCallback(() => {
+    setSelectedIds(new Set()); // Reset selection before sync
     const formData = new FormData();
     formData.set("intent", "sync");
     submit(formData, { method: "post" });
@@ -288,6 +289,25 @@ export default function ProductsPage() {
                     </Text>
                   </EmptyState>
                 ) : (
+
+                  {/* Bulk Actions Bar */}
+                  {selectedCount > 0 && (
+                    <BulkActions
+                      selectedItemsCount={selectedCount}
+                      onDismiss={() => setSelectedIds(new Set())}
+                      actions={[
+                        {
+                          content: "Generate Alt Text",
+                          onAction: () => {
+                            // Store selected IDs and navigate to generate page
+                            sessionStorage.setItem("selectedProductIds", Array.from(selectedIds).join(","));
+                            window.location.href = "/app/generate";
+                          },
+                        },
+                      ]}
+                    />
+                  )}
+
                   <IndexTable
                     resourceName={{ singular: "product", plural: "products" }}
                     itemCount={products.length}

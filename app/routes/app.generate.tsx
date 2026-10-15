@@ -6,7 +6,7 @@ import {
   Select, Banner, ProgressBar, Badge, Thumbnail, IndexTable,
   FormLayout, ChoiceList, List, Modal,
 } from "@shopify/polaris";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { analyzeImage, generateTags, generateJsonLd } from "~/services/openai.server";
@@ -345,6 +345,17 @@ export default function GeneratePage() {
   const handleSelectionChange = useCallback((newSelectedResources: string[]) => {
     setSelectedIds(new Set(newSelectedResources));
   }, []);
+
+  // Load selected product IDs from sessionStorage (passed from products page)
+  useEffect(() => {
+    const storedIds = sessionStorage.getItem("selectedProductIds");
+    if (storedIds) {
+      const ids = storedIds.split(",").filter(Boolean);
+      setSelectedIds(new Set(ids));
+      sessionStorage.removeItem("selectedProductIds"); // Clear after loading
+    }
+  }, []);
+
   const selectedCount = selectedIds.size;
   const allSelected = products.length > 0 && selectedCount === products.length;
 
