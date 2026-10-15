@@ -140,11 +140,13 @@ export default function ProductsPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Reset selection when products list changes
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [products]);
+
   const handleSelectionChange = useCallback((
     newSelectedResources: string[],
-    _allSelected: boolean,
-    _selectionChanged: string[],
-    _allPageItemsSelected: boolean,
   ) => {
     setSelectedIds(new Set(newSelectedResources));
   }, []);
