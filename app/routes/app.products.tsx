@@ -13,14 +13,12 @@ import {
   Select,
   Thumbnail,
   Checkbox,
-
   EmptyState,
   SkeletonBodyText,
-  Banner,
   Toast,
   Box,
 } from "@shopify/polaris";
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { syncProductsFromShopify } from "~/services/sync.server";
@@ -50,12 +48,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const products = await prisma.product.findMany({
     where,
     include: {
-      images: {
-        take: 1,
-      },
-      _count: {
-        select: { images: true },
-      },
+      images: { take: 1 },
+      _count: { select: { images: true } },
     },
     orderBy: { title: "asc" },
     take: 100,
@@ -107,14 +101,13 @@ export default function ProductsPage() {
   const [toastActive, setToastActive] = useState(false);
   const [toastContent, setToastContent] = useState("");
 
-  // Show toast when sync completes
   useEffect(() => {
     if (!actionData) return;
     if (actionData.success) {
-      setToastContent(`✅ Synced ${actionData.synced} products from Shopify`);
+      setToastContent(`Synced ${actionData.synced} products from Shopify`);
       setToastActive(true);
     } else if (actionData.error) {
-      setToastContent(`❌ Sync failed: ${actionData.error}`);
+      setToastContent(`Sync failed: ${actionData.error}`);
       setToastActive(true);
     }
   }, [actionData]);
@@ -137,119 +130,45 @@ export default function ProductsPage() {
     submit(formData, { method: "post" });
   }, [submit]);
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  // Always compute valid selection from current products
-  const validSelectedIds = useMemo(() => {
-    const currentIds = new Set(products.map((p) => p.id));
-    const valid = new Set<string>();
-    selectedIds.forEach((id) => {
-      if (currentIds.has(id)) valid.add(id);
-    });
-    return valid;
-  }, [selectedIds, products]);
-
-  // Auto-clear when product list changes (by ID, not just count)
-  const productIdsKey = products.map((p) => p.id).sort().join(",");
-  const prevProductIdsKey = useRef(productIdsKey);
-  useEffect(() => {
-    if (prevProductIdsKey.current !== productIdsKey) {
-      setSelectedIds(new Set());
-      prevProductIdsKey.current = productIdsKey;
-    }
-  }, [productIdsKey]);
+  // Simple string array for selected product IDs — no Set, no useMemo, no useRef
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const toggleOne = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   }, []);
 
   const toggleAll = useCallback(() => {
     setSelectedIds((prev) => {
-      const valid = new Set(products.map((p) => p.id));
-      // Check against valid selection, not raw prev
-      const currentlyAllSelected = products.length > 0 && products.every((p) => validSelectedIds.has(p.id));
-      if (currentlyAllSelected) {
-        return new Set();
-      }
-      return valid;
+      const allProductIds = products.map((p) => p.id);
+      const allSelected = allProductIds.length > 0 && allProductIds.every((id) => prev.includes(id));
+      return allSelected ? [] : allProductIds;
     });
-  }, [products, validSelectedIds]);
+  }, [products]);
 
-  const selectedCount = validSelectedIds.size;
+  // Clear selection whenever the product list changes (filter/sync)
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [products]);
+
+  const selectedCount = selectedIds.length;
   const allSelected = products.length > 0 && selectedCount === products.length;
   const someSelected = selectedCount > 0 && !allSelected;
 
-  /** Truncate long product titles with ellipsis */
-  const truncateTitle = (title: string, maxLen: number = 50): string => {
-    if (title.length <= maxLen) return title;
-    return title.substring(0, maxLen) + "…";
-  };
+  const truncateTitle = (title: string, maxLen = 50): string =>
+    title.length <= maxLen ? title : title.substring(0, maxLen) + "\u2026";
 
-  /** Show a placeholder for broken/missing image URLs */
   const renderThumbnail = (src: string | null, alt: string) => {
     if (!src) {
       return (
-        <Box
-          width="40px"
-          height="40px"
-          borderRadius="100"
-          background="bg-surface-secondary"
-        >
-          <Text as="p" variant="bodyXs" alignment="center" tone="subdued">
-            —
-          </Text>
+        <Box width="40px" height="40px" borderRadius="100" background="bg-surface-secondary">
+          <Text as="p" variant="bodyXs" alignment="center" tone="subdued">{"\u2014"}</Text>
         </Box>
       );
     }
-    return (
-      <Thumbnail
-        source={src}
-        alt={alt}
-        size="small"
-      />
-    );
+    return <Thumbnail source={src} alt={alt} size="small" />;
   };
-
-  const rows = products.map((product) => {
-    const altStatus = product.imageCount === 0
-      ? <Badge tone="subdued">No images</Badge>
-      : product.missingAltCount === 0
-        ? <Badge tone="success">Complete</Badge>
-        : product.hasAltText
-          ? <Badge tone="warning">Partial</Badge>
-          : <Badge tone="critical">Missing</Badge>;
-
-    const imageCountDisplay = product.imageCount === 0
-      ? <Badge tone="subdued">No images</Badge>
-      : <Text as="p">{product.imageCount}</Text>;
-
-    return [
-      renderThumbnail(product.firstImage, product.title),
-      <div>
-        <Text as="p" variant="bodyMd" fontWeight="semibold">
-          {truncateTitle(product.title)}
-        </Text>
-        <Text as="p" variant="bodySm" tone="subdued">
-          /{product.handle}
-        </Text>
-      </div>,
-      imageCountDisplay,
-      altStatus,
-      product.hasJsonLd ? (
-        <Badge tone="success">Yes</Badge>
-      ) : (
-        <Badge tone="subdued">No</Badge>
-      ),
-    ];
-  });
 
   const toastMarkup = toastActive ? (
     <Toast content={toastContent} onDismiss={() => setToastActive(false)} />
@@ -260,192 +179,139 @@ export default function ProductsPage() {
       title="Products"
       subtitle={`${totalProducts} products found`}
       primaryAction={
-        <Button
-          variant="primary"
-          onClick={handleSync}
-          disabled={isSyncing}
-          loading={isSyncing}
-        >
-          {isSyncing ? "Syncing…" : "Sync from Shopify"}
+        <Button variant="primary" onClick={handleSync} disabled={isSyncing} loading={isSyncing}>
+          {isSyncing ? "Syncing\u2026" : "Sync from Shopify"}
         </Button>
       }
     >
       {toastMarkup}
       <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <InlineStack align="space-between" blockAlign="center">
-                  <Text as="h2" variant="headingMd">
-                    Product Inventory
-                  </Text>
-                  <InlineStack gap="200">
-                    <Select
-                      label=""
-                      labelInline
-                      options={[
-                        { label: "All Products", value: "all" },
-                        { label: "Missing Alt Text", value: "missing_alt" },
-                        { label: "Has Alt Text", value: "has_alt" },
-                        { label: "Has Tags", value: "has_tags" },
-                        { label: "Has JSON-LD", value: "has_jsonld" },
-                      ]}
-                      value={selectedFilter}
-                      onChange={handleFilterChange}
-                    />
-                  </InlineStack>
-                </InlineStack>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text as="h2" variant="headingMd">Product Inventory</Text>
+                <Select
+                  label=""
+                  labelInline
+                  options={[
+                    { label: "All Products", value: "all" },
+                    { label: "Missing Alt Text", value: "missing_alt" },
+                    { label: "Has Alt Text", value: "has_alt" },
+                    { label: "Has Tags", value: "has_tags" },
+                    { label: "Has JSON-LD", value: "has_jsonld" },
+                  ]}
+                  value={selectedFilter}
+                  onChange={handleFilterChange}
+                />
+              </InlineStack>
 
-                {/* Loading skeleton */}
-                {isSyncing ? (
-                  <BlockStack gap="300">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <InlineStack key={i} gap="200" blockAlign="center">
-                        <Box width="40px" height="40px" borderRadius="100" background="bg-surface-secondary" />
-                        <Box flex={1}>
-                          <SkeletonBodyText lines={1} />
-                        </Box>
-                        <Box width="60px">
-                          <SkeletonBodyText lines={1} />
-                        </Box>
-                      </InlineStack>
-                    ))}
-                  </BlockStack>
-                ) : products.length === 0 ? (
-                  <EmptyState
-                    heading="No products found"
-                    action={{
-                      content: "Sync from Shopify",
-                      onAction: handleSync,
-                    }}
+              {isSyncing ? (
+                <BlockStack gap="300">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <InlineStack key={i} gap="200" blockAlign="center">
+                      <Box width="40px" height="40px" borderRadius="100" background="bg-surface-secondary" />
+                      <Box flex={1}><SkeletonBodyText lines={1} /></Box>
+                      <Box width="60px"><SkeletonBodyText lines={1} /></Box>
+                    </InlineStack>
+                  ))}
+                </BlockStack>
+              ) : products.length === 0 ? (
+                <EmptyState
+                  heading="No products found"
+                  action={{ content: "Sync from Shopify", onAction: handleSync }}
+                >
+                  <Text as="p">Sync your products from Shopify to start optimizing alt text.</Text>
+                </EmptyState>
+              ) : (
+                <BlockStack gap="0">
+                  {/* Selection bar */}
+                  <InlineStack
+                    align="space-between"
+                    blockAlign="center"
+                    paddingBlockStart="200"
+                    paddingBlockEnd="200"
+                    paddingInlineStart="400"
+                    paddingInlineEnd="400"
                   >
-                    <Text as="p">
-                      Sync your products from Shopify to start optimizing alt text.
-                    </Text>
-                  </EmptyState>
-                ) : (
-                  <BlockStack gap="0">
-                    {/* Selection bar */}
-                    <InlineStack align="space-between" blockAlign="center" paddingBlockStart="200" paddingBlockEnd="200" paddingInlineStart="400" paddingInlineEnd="400">
-                      <InlineStack gap="200" blockAlign="center">
-                        <Checkbox
-                          label=""
-                          checked={allSelected}
-                          indeterminate={someSelected}
-                          onChange={toggleAll}
-                        />
-                        {selectedCount > 0 && (
-                          <Text variant="bodySm" tone="subdued">
-                            {selectedCount} selected
-                          </Text>
-                        )}
-                      </InlineStack>
+                    <InlineStack gap="200" blockAlign="center">
+                      <Checkbox label="" checked={allSelected} indeterminate={someSelected} onChange={toggleAll} />
                       {selectedCount > 0 && (
-                        <Button
-                          variant="primary"
-                          size="slim"
-                          onClick={() => {
-                            const ids = Array.from(validSelectedIds);
-                            console.log("Generate alt text for:", ids);
-                            // TODO: Navigate to generate page with selected IDs
-                          }}
-                        >
-                          Generate Alt Text
-                        </Button>
+                        <Text variant="bodySm" tone="subdued">{selectedCount} selected</Text>
                       )}
                     </InlineStack>
+                    {selectedCount > 0 && (
+                      <Button
+                        variant="primary"
+                        size="slim"
+                        onClick={() => {
+                          console.log("Generate alt text for:", selectedIds);
+                        }}
+                      >
+                        Generate Alt Text
+                      </Button>
+                    )}
+                  </InlineStack>
 
-                    {/* Table header */}
-                    <InlineStack
-                      blockAlign="center"
-                      paddingBlockStart="200"
-                      paddingBlockEnd="200"
-                      paddingInlineStart="400"
-                      paddingInlineEnd="400"
-                      style={{
-                        borderBottom: "1px solid var(--p-color-border-subdued)",
-                        background: "var(--p-color-bg-surface-secondary)",
-                      }}
-                    >
-                      <Box width="40px" />
-                      <Box flex={1}>
-                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">Product</Text>
-                      </Box>
-                      <Box width="80px">
-                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">Images</Text>
-                      </Box>
-                      <Box width="120px">
-                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">Alt Status</Text>
-                      </Box>
-                      <Box width="80px">
-                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">JSON-LD</Text>
-                      </Box>
-                    </InlineStack>
+                  {/* Table header */}
+                  <InlineStack
+                    blockAlign="center"
+                    paddingBlockStart="200"
+                    paddingBlockEnd="200"
+                    paddingInlineStart="400"
+                    paddingInlineEnd="400"
+                    style={{ borderBottom: "1px solid var(--p-color-border-subdued)", background: "var(--p-color-bg-surface-secondary)" }}
+                  >
+                    <Box width="40px" />
+                    <Box flex={1}><Text variant="bodySm" fontWeight="semibold" tone="subdued">Product</Text></Box>
+                    <Box width="80px"><Text variant="bodySm" fontWeight="semibold" tone="subdued">Images</Text></Box>
+                    <Box width="120px"><Text variant="bodySm" fontWeight="semibold" tone="subdued">Alt Status</Text></Box>
+                    <Box width="80px"><Text variant="bodySm" fontWeight="semibold" tone="subdued">JSON-LD</Text></Box>
+                  </InlineStack>
 
-                    {/* Product rows */}
-                    {products.map((product) => {
-                      const isChecked = validSelectedIds.has(product.id);
-                      const altStatus = product.imageCount === 0
-                        ? <Badge tone="subdued">No images</Badge>
-                        : product.missingAltCount === 0
-                          ? <Badge tone="success">Complete</Badge>
-                          : product.hasAltText
-                            ? <Badge tone="warning">Partial</Badge>
-                            : <Badge tone="critical">Missing</Badge>;
+                  {/* Product rows */}
+                  {products.map((product) => {
+                    const isChecked = selectedIds.includes(product.id);
+                    const altStatus =
+                      product.imageCount === 0 ? <Badge tone="subdued">No images</Badge> :
+                      product.missingAltCount === 0 ? <Badge tone="success">Complete</Badge> :
+                      product.hasAltText ? <Badge tone="warning">Partial</Badge> :
+                      <Badge tone="critical">Missing</Badge>;
 
-                      return (
-                        <InlineStack
-                          key={product.id}
-                          blockAlign="center"
-                          paddingBlockStart="200"
-                          paddingBlockEnd="200"
-                          paddingInlineStart="400"
-                          paddingInlineEnd="400"
-                          style={{
-                            borderBottom: "1px solid var(--p-color-border-subdued)",
-                            cursor: "pointer",
-                          }}
-                          onClick={() => toggleOne(product.id)}
-                        >
-                          <Box width="40px">
-                            <Checkbox
-                              label=""
-                              checked={isChecked}
-                              onChange={() => toggleOne(product.id)}
-                            />
-                          </Box>
-                          <Box flex={1}>
-                            <Text as="p" variant="bodyMd" fontWeight="semibold">
-                              {truncateTitle(product.title)}
-                            </Text>
-                            <Text as="p" variant="bodySm" tone="subdued">
-                              /{product.handle}
-                            </Text>
-                          </Box>
-                          <Box width="80px">
-                            {product.imageCount === 0 ? (
-                              <Badge tone="subdued">No images</Badge>
-                            ) : (
-                              <Text as="p">{product.imageCount}</Text>
-                            )}
-                          </Box>
-                          <Box width="120px">{altStatus}</Box>
-                          <Box width="80px">
-                            {product.hasJsonLd ? (
-                              <Badge tone="success">Yes</Badge>
-                            ) : (
-                              <Badge tone="subdued">No</Badge>
-                            )}
-                          </Box>
-                        </InlineStack>
-                      );
-                    })}
-                  </BlockStack>
-                )}
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+                    return (
+                      <InlineStack
+                        key={product.id}
+                        blockAlign="center"
+                        paddingBlockStart="200"
+                        paddingBlockEnd="200"
+                        paddingInlineStart="400"
+                        paddingInlineEnd="400"
+                        style={{ borderBottom: "1px solid var(--p-color-border-subdued)", cursor: "pointer" }}
+                        onClick={() => toggleOne(product.id)}
+                      >
+                        <Box width="40px">
+                          <Checkbox label="" checked={isChecked} onChange={() => toggleOne(product.id)} />
+                        </Box>
+                        <Box flex={1}>
+                          <Text as="p" variant="bodyMd" fontWeight="semibold">{truncateTitle(product.title)}</Text>
+                          <Text as="p" variant="bodySm" tone="subdued">/{product.handle}</Text>
+                        </Box>
+                        <Box width="80px">
+                          {product.imageCount === 0 ? <Badge tone="subdued">No images</Badge> : <Text as="p">{product.imageCount}</Text>}
+                        </Box>
+                        <Box width="120px">{altStatus}</Box>
+                        <Box width="80px">
+                          {product.hasJsonLd ? <Badge tone="success">Yes</Badge> : <Badge tone="subdued">No</Badge>}
+                        </Box>
+                      </InlineStack>
+                    );
+                  })}
+                </BlockStack>
+              )}
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }
