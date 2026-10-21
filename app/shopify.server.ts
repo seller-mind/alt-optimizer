@@ -35,9 +35,10 @@ const shopify = shopifyApp({
       try {
         await prisma.shop.upsert({
           where: { shopDomain: shop },
-          update: {},
+          update: { accessToken: session.accessToken || "" },
           create: {
             shopDomain: shop,
+            accessToken: session.accessToken || "",
             planType: "free",
           },
         });
