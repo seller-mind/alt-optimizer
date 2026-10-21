@@ -12,7 +12,6 @@ import {
   InlineStack,
   Select,
   Thumbnail,
-  Checkbox,
   EmptyState,
   SkeletonBodyText,
   Toast,
@@ -130,26 +129,34 @@ export default function ProductsPage() {
     submit(formData, { method: "post" });
   }, [submit]);
 
-  // Simple string array for selected product IDs — no Set, no useMemo, no useRef
+  // ===== SELECTION STATE: dead simple =====
+  // selectedIds is a plain string array. Always starts empty.
+  // Recomputed from scratch on every products change.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const toggleOne = useCallback((id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  }, []);
-
-  const toggleAll = useCallback(() => {
-    setSelectedIds((prev) => {
-      const allProductIds = products.map((p) => p.id);
-      const allSelected = allProductIds.length > 0 && allProductIds.every((id) => prev.includes(id));
-      return allSelected ? [] : allProductIds;
-    });
-  }, [products]);
-
-  // Clear selection whenever the product list changes (filter/sync)
+  // KEY FIX: Reset selection EVERY TIME products array reference changes
+  // This runs on initial mount AND on every filter/sync change
   useEffect(() => {
     setSelectedIds([]);
+  }, [products]);
+
+  const handleToggleOne = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
+      }
+      return [...prev, id];
+    });
+  }, []);
+
+  const handleToggleAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      const allIds = products.map((p) => p.id);
+      if (allIds.length > 0 && allIds.every((id) => prev.includes(id))) {
+        return [];
+      }
+      return allIds;
+    });
   }, [products]);
 
   const selectedCount = selectedIds.length;
@@ -158,17 +165,6 @@ export default function ProductsPage() {
 
   const truncateTitle = (title: string, maxLen = 50): string =>
     title.length <= maxLen ? title : title.substring(0, maxLen) + "\u2026";
-
-  const renderThumbnail = (src: string | null, alt: string) => {
-    if (!src) {
-      return (
-        <Box width="40px" height="40px" borderRadius="100" background="bg-surface-secondary">
-          <Text as="p" variant="bodyXs" alignment="center" tone="subdued">{"\u2014"}</Text>
-        </Box>
-      );
-    }
-    return <Thumbnail source={src} alt={alt} size="small" />;
-  };
 
   const toastMarkup = toastActive ? (
     <Toast content={toastContent} onDismiss={() => setToastActive(false)} />
@@ -225,22 +221,18 @@ export default function ProductsPage() {
                 </EmptyState>
               ) : (
                 <BlockStack gap="0">
-                  {/* Selection bar */}
-                  <InlineStack
-                    align="space-between"
-                    blockAlign="center"
-                    paddingBlockStart="200"
-                    paddingBlockEnd="200"
-                    paddingInlineStart="400"
-                    paddingInlineEnd="400"
-                  >
-                    <InlineStack gap="200" blockAlign="center">
-                      <Checkbox label="" checked={allSelected} indeterminate={someSelected} onChange={toggleAll} />
-                      {selectedCount > 0 && (
-                        <Text variant="bodySm" tone="subdued">{selectedCount} selected</Text>
-                      )}
-                    </InlineStack>
-                    {selectedCount > 0 && (
+                  {/* Selection bar — only shows when items are selected */}
+                  {selectedCount > 0 && (
+                    <InlineStack
+                      align="space-between"
+                      blockAlign="center"
+                      paddingBlockStart="200"
+                      paddingBlockEnd="200"
+                      paddingInlineStart="400"
+                      paddingInlineEnd="400"
+                      style={{ borderBottom: "1px solid var(--p-color-border-subdued)" }}
+                    >
+                      <Text variant="bodySm" tone="subdued">{selectedCount} selected</Text>
                       <Button
                         variant="primary"
                         size="slim"
@@ -250,10 +242,10 @@ export default function ProductsPage() {
                       >
                         Generate Alt Text
                       </Button>
-                    )}
-                  </InlineStack>
+                    </InlineStack>
+                  )}
 
-                  {/* Table header */}
+                  {/* Table header with select-all checkbox */}
                   <InlineStack
                     blockAlign="center"
                     paddingBlockStart="200"
@@ -262,7 +254,16 @@ export default function ProductsPage() {
                     paddingInlineEnd="400"
                     style={{ borderBottom: "1px solid var(--p-color-border-subdued)", background: "var(--p-color-bg-surface-secondary)" }}
                   >
-                    <Box width="40px" />
+                    <Box width="40px">
+                      {/* Native HTML checkbox — zero Polaris interference */}
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                        onChange={handleToggleAll}
+                        style={{ width: 16, height: 16, cursor: "pointer" }}
+                      />
+                    </Box>
                     <Box flex={1}><Text variant="bodySm" fontWeight="semibold" tone="subdued">Product</Text></Box>
                     <Box width="80px"><Text variant="bodySm" fontWeight="semibold" tone="subdued">Images</Text></Box>
                     <Box width="120px"><Text variant="bodySm" fontWeight="semibold" tone="subdued">Alt Status</Text></Box>
@@ -287,12 +288,26 @@ export default function ProductsPage() {
                         paddingInlineStart="400"
                         paddingInlineEnd="400"
                         style={{ borderBottom: "1px solid var(--p-color-border-subdued)", cursor: "pointer" }}
-                        onClick={() => toggleOne(product.id)}
+                        onClick={() => handleToggleOne(product.id)}
                       >
                         <Box width="40px">
-                          <Checkbox label="" checked={isChecked} onChange={() => toggleOne(product.id)} />
+                          {/* Native HTML checkbox — zero Polaris interference */}
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleOne(product.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ width: 16, height: 16, cursor: "pointer" }}
+                          />
                         </Box>
                         <Box flex={1}>
+                          {product.firstImage ? (
+                            <Thumbnail source={product.firstImage} alt={product.title} size="small" />
+                          ) : (
+                            <Box width="40px" height="40px" borderRadius="100" background="bg-surface-secondary" />
+                          )}
+                        </Box>
+                        <Box flex={2}>
                           <Text as="p" variant="bodyMd" fontWeight="semibold">{truncateTitle(product.title)}</Text>
                           <Text as="p" variant="bodySm" tone="subdued">/{product.handle}</Text>
                         </Box>
