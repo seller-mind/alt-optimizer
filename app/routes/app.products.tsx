@@ -259,7 +259,6 @@ export default function ProductsPage() {
                       <input
                         type="checkbox"
                         checked={allSelected}
-                        ref={(el) => { if (el) el.indeterminate = someSelected; }}
                         onChange={handleToggleAll}
                         style={{ width: 16, height: 16, cursor: "pointer" }}
                       />
