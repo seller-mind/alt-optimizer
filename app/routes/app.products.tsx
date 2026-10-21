@@ -139,6 +139,19 @@ export default function ProductsPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // 当产品 ID 列表变化时，清理 stale IDs
+  const productIdsKey = products.map((p) => p.id).sort().join(",");
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const currentIds = new Set(products.map((p) => p.id));
+      const filtered = new Set<string>();
+      prev.forEach((id) => {
+        if (currentIds.has(id)) filtered.add(id);
+      });
+      return filtered;
+    });
+  }, [productIdsKey]);
+
   const toggleOne = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
