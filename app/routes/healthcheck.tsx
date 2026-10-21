@@ -13,6 +13,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return new Response(
       JSON.stringify({
         status: "healthy",
+        version: "v1.0.1-NEW",
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
       }),
