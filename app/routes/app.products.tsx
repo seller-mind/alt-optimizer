@@ -12,7 +12,7 @@ import {
   InlineStack,
   Select,
   Thumbnail,
-  IndexTable,
+  Checkbox,
 
   EmptyState,
   SkeletonBodyText,
@@ -139,30 +139,30 @@ export default function ProductsPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Reset selection when product list changes (filter changed)
-  useEffect(() => {
-    const currentProductIds = new Set(products.map((p) => p.id));
+  const toggleOne = useCallback((id: string) => {
     setSelectedIds((prev) => {
-      // Keep only IDs that are still in the current product list
-      const filtered = new Set<string>();
-      prev.forEach((id) => {
-        if (currentProductIds.has(id)) filtered.add(id);
-      });
-      return filtered;
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
     });
-  }, [products]);
-
-  const handleSelectionChange = useCallback((
-    newSelectedResources: string[],
-    _allSelected: boolean,
-    _selectionChanged: string[],
-    _allPageItemsSelected: boolean,
-  ) => {
-    setSelectedIds(new Set(newSelectedResources));
   }, []);
+
+  const toggleAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === products.length) {
+        return new Set();
+      }
+      return new Set(products.map((p) => p.id));
+    });
+  }, [products.length]);
 
   const selectedCount = selectedIds.size;
   const allSelected = products.length > 0 && selectedCount === products.length;
+  const someSelected = selectedCount > 0 && !allSelected;
 
   /** Truncate long product titles with ellipsis */
   const truncateTitle = (title: string, maxLen: number = 50): string => {
@@ -301,20 +301,67 @@ export default function ProductsPage() {
                     </Text>
                   </EmptyState>
                 ) : (
-                  <IndexTable
-                    resourceName={{ singular: "product", plural: "products" }}
-                    itemCount={products.length}
-                    selectedItemsCount={allSelected ? "All" : selectedCount}
-                    headings={[
-                      { title: "Image" },
-                      { title: "Product" },
-                      { title: "Images" },
-                      { title: "Alt Status" },
-                      { title: "JSON-LD" },
-                    ]}
-                    onSelectionChange={handleSelectionChange}
-                  >
-                    {products.map((product, index) => {
+                  <BlockStack gap="0">
+                    {/* Selection bar */}
+                    <InlineStack align="space-between" blockAlign="center" paddingBlockStart="200" paddingBlockEnd="200" paddingInlineStart="400" paddingInlineEnd="400">
+                      <InlineStack gap="200" blockAlign="center">
+                        <Checkbox
+                          label=""
+                          checked={allSelected}
+                          indeterminate={someSelected}
+                          onChange={toggleAll}
+                        />
+                        {selectedCount > 0 && (
+                          <Text variant="bodySm" tone="subdued">
+                            {selectedCount} selected
+                          </Text>
+                        )}
+                      </InlineStack>
+                      {selectedCount > 0 && (
+                        <Button
+                          variant="primary"
+                          size="slim"
+                          onClick={() => {
+                            const ids = Array.from(selectedIds);
+                            console.log("Generate alt text for:", ids);
+                            // TODO: Navigate to generate page with selected IDs
+                          }}
+                        >
+                          Generate Alt Text
+                        </Button>
+                      )}
+                    </InlineStack>
+
+                    {/* Table header */}
+                    <InlineStack
+                      blockAlign="center"
+                      paddingBlockStart="200"
+                      paddingBlockEnd="200"
+                      paddingInlineStart="400"
+                      paddingInlineEnd="400"
+                      style={{
+                        borderBottom: "1px solid var(--p-color-border-subdued)",
+                        background: "var(--p-color-bg-surface-secondary)",
+                      }}
+                    >
+                      <Box width="40px" />
+                      <Box flex={1}>
+                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">Product</Text>
+                      </Box>
+                      <Box width="80px">
+                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">Images</Text>
+                      </Box>
+                      <Box width="120px">
+                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">Alt Status</Text>
+                      </Box>
+                      <Box width="80px">
+                        <Text variant="bodySm" fontWeight="semibold" tone="subdued">JSON-LD</Text>
+                      </Box>
+                    </InlineStack>
+
+                    {/* Product rows */}
+                    {products.map((product) => {
+                      const isChecked = selectedIds.has(product.id);
                       const altStatus = product.imageCount === 0
                         ? <Badge tone="subdued">No images</Badge>
                         : product.missingAltCount === 0
@@ -324,62 +371,53 @@ export default function ProductsPage() {
                             : <Badge tone="critical">Missing</Badge>;
 
                       return (
-                        <IndexTable.Row
-                          id={product.id}
+                        <InlineStack
                           key={product.id}
-                          selected={selectedIds.has(product.id)}
-                          position={index}
+                          blockAlign="center"
+                          paddingBlockStart="200"
+                          paddingBlockEnd="200"
+                          paddingInlineStart="400"
+                          paddingInlineEnd="400"
+                          style={{
+                            borderBottom: "1px solid var(--p-color-border-subdued)",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => toggleOne(product.id)}
                         >
-                          <IndexTable.Cell>
-                            {product.firstImage ? (
-                              <Thumbnail
-                                source={product.firstImage}
-                                alt={product.title}
-                                size="small"
-                              />
-                            ) : (
-                              <Box
-                                width="40px"
-                                height="40px"
-                                borderRadius="100"
-                                background="bg-surface-secondary"
-                                display="flex"
-                                alignItems="center"
-                                justifyContent="center"
-                              >
-                                <Text as="p" variant="bodyXs" tone="subdued" alignment="center">
-                                  —
-                                </Text>
-                              </Box>
-                            )}
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
+                          <Box width="40px">
+                            <Checkbox
+                              label=""
+                              checked={isChecked}
+                              onChange={() => toggleOne(product.id)}
+                            />
+                          </Box>
+                          <Box flex={1}>
                             <Text as="p" variant="bodyMd" fontWeight="semibold">
                               {truncateTitle(product.title)}
                             </Text>
                             <Text as="p" variant="bodySm" tone="subdued">
                               /{product.handle}
                             </Text>
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>
+                          </Box>
+                          <Box width="80px">
                             {product.imageCount === 0 ? (
                               <Badge tone="subdued">No images</Badge>
                             ) : (
                               <Text as="p">{product.imageCount}</Text>
                             )}
-                          </IndexTable.Cell>
-                          <IndexTable.Cell>{altStatus}</IndexTable.Cell>
-                          <IndexTable.Cell>
+                          </Box>
+                          <Box width="120px">{altStatus}</Box>
+                          <Box width="80px">
                             {product.hasJsonLd ? (
                               <Badge tone="success">Yes</Badge>
                             ) : (
                               <Badge tone="subdued">No</Badge>
                             )}
-                          </IndexTable.Cell>
-                        </IndexTable.Row>
+                          </Box>
+                        </InlineStack>
                       );
                     })}
-                  </IndexTable>
+                  </BlockStack>
                 )}
               </BlockStack>
             </Card>
