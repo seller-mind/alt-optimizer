@@ -20,7 +20,7 @@ import {
   Toast,
   Box,
 } from "@shopify/polaris";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { authenticate } from "~/shopify.server";
 import prisma from "~/db.server";
 import { syncProductsFromShopify } from "~/services/sync.server";
@@ -139,17 +139,24 @@ export default function ProductsPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // 当产品 ID 列表变化时，清理 stale IDs
-  const productIdsKey = products.map((p) => p.id).sort().join(",");
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      const currentIds = new Set(products.map((p) => p.id));
-      const filtered = new Set<string>();
-      prev.forEach((id) => {
-        if (currentIds.has(id)) filtered.add(id);
-      });
-      return filtered;
+  // Always compute valid selection from current products
+  const validSelectedIds = useMemo(() => {
+    const currentIds = new Set(products.map((p) => p.id));
+    const valid = new Set<string>();
+    selectedIds.forEach((id) => {
+      if (currentIds.has(id)) valid.add(id);
     });
+    return valid;
+  }, [selectedIds, products]);
+
+  // Auto-clear when product list changes (by ID, not just count)
+  const productIdsKey = products.map((p) => p.id).sort().join(",");
+  const prevProductIdsKey = useRef(productIdsKey);
+  useEffect(() => {
+    if (prevProductIdsKey.current !== productIdsKey) {
+      setSelectedIds(new Set());
+      prevProductIdsKey.current = productIdsKey;
+    }
   }, [productIdsKey]);
 
   const toggleOne = useCallback((id: string) => {
@@ -166,14 +173,17 @@ export default function ProductsPage() {
 
   const toggleAll = useCallback(() => {
     setSelectedIds((prev) => {
-      if (prev.size === products.length) {
+      const valid = new Set(products.map((p) => p.id));
+      // Check against valid selection, not raw prev
+      const currentlyAllSelected = products.length > 0 && products.every((p) => validSelectedIds.has(p.id));
+      if (currentlyAllSelected) {
         return new Set();
       }
-      return new Set(products.map((p) => p.id));
+      return valid;
     });
-  }, [products.length]);
+  }, [products, validSelectedIds]);
 
-  const selectedCount = selectedIds.size;
+  const selectedCount = validSelectedIds.size;
   const allSelected = products.length > 0 && selectedCount === products.length;
   const someSelected = selectedCount > 0 && !allSelected;
 
@@ -335,7 +345,7 @@ export default function ProductsPage() {
                           variant="primary"
                           size="slim"
                           onClick={() => {
-                            const ids = Array.from(selectedIds);
+                            const ids = Array.from(validSelectedIds);
                             console.log("Generate alt text for:", ids);
                             // TODO: Navigate to generate page with selected IDs
                           }}
@@ -374,7 +384,7 @@ export default function ProductsPage() {
 
                     {/* Product rows */}
                     {products.map((product) => {
-                      const isChecked = selectedIds.has(product.id);
+                      const isChecked = validSelectedIds.has(product.id);
                       const altStatus = product.imageCount === 0
                         ? <Badge tone="subdued">No images</Badge>
                         : product.missingAltCount === 0
