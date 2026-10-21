@@ -186,7 +186,10 @@ export default function ProductsPage() {
           <Card>
             <BlockStack gap="400">
               <InlineStack align="space-between" blockAlign="center">
-                <Text as="h2" variant="headingMd">Product Inventory</Text>
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="h2" variant="headingMd">Product Inventory</Text>
+                  <Badge tone="info">v2.0.0-FIXED</Badge>
+                </InlineStack>
                 <Select
                   label=""
                   labelInline
