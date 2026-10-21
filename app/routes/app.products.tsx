@@ -139,6 +139,19 @@ export default function ProductsPage() {
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // Reset selection when product list changes (filter changed)
+  useEffect(() => {
+    const currentProductIds = new Set(products.map((p) => p.id));
+    setSelectedIds((prev) => {
+      // Keep only IDs that are still in the current product list
+      const filtered = new Set<string>();
+      prev.forEach((id) => {
+        if (currentProductIds.has(id)) filtered.add(id);
+      });
+      return filtered;
+    });
+  }, [products]);
+
   const handleSelectionChange = useCallback((
     newSelectedResources: string[],
     _allSelected: boolean,
