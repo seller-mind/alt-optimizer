@@ -17,7 +17,7 @@ export default function AppLayout() {
       >
         <InlineStack align="center" blockAlign="center">
           <Text as="p" variant="bodySm" tone="subdued">
-            AltOptimizer v1.0.0
+            AltOptimizer v1.0.1-NEW
           </Text>
         </InlineStack>
       </Box>
