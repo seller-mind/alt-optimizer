@@ -16,11 +16,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
 
-  if (shop) {
-    return redirect(`/app${url.search}`);
-  }
+  const target = shop ? `/app${url.search}` : "/install";
+  console.log(`[AltOptimizer] root route ${url.pathname}${url.search} -> ${target}`);
 
-  return redirect("/install");
+  return redirect(target);
 }
 
 export default function Index() {
