@@ -406,17 +406,26 @@ export default function GeneratePage() {
 
   const eligibleCount = products.reduce((sum, p) => sum + p.images.filter(img => img.needsGeneration).length, 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const handleSelectionChange = useCallback((newSelectedResources: string[]) => {
-    const currentPageIds = new Set(products.map((p) => String(p.id)));
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      currentPageIds.forEach((id) => {
-        if (!newSelectedResources.includes(id)) next.delete(id);
+  const handleSelectionChange = useCallback(
+    (newSelectedResources: string[] | "All" | "Page") => {
+      const currentPageIds = new Set(products.map((p) => String(p.id)));
+      // Polaris passes "All" / "Page" for header checkboxes, and a string[] for rows.
+      const selectedArray: string[] = Array.isArray(newSelectedResources)
+        ? newSelectedResources
+        : newSelectedResources === "All" || newSelectedResources === "Page"
+        ? Array.from(currentPageIds)
+        : [];
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        currentPageIds.forEach((id) => {
+          if (!selectedArray.includes(id)) next.delete(id);
+        });
+        selectedArray.forEach((id) => next.add(id));
+        return next;
       });
-      newSelectedResources.forEach((id) => next.add(id));
-      return next;
-    });
-  }, [products]);
+    },
+    [products]
+  );
   const selectedCount = selectedIds.size;
 
   // Show quota info modal when quota exceeded

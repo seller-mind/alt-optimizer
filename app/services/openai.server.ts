@@ -100,8 +100,8 @@ export async function analyzeImage(
 
   // If it's a URL (starts with http), pass it directly; otherwise build data URL
   const imageContent = imageBase64OrUrl.startsWith("http")
-    ? { type: "image_url" as const, image_url: { url: imageBase64OrUrl, detail: "high" } }
-    : { type: "image_url" as const, image_url: { url: `data:${mimeType};base64,${imageBase64OrUrl}`, detail: "high" } };
+    ? { type: "image_url" as const, image_url: { url: imageBase64OrUrl, detail: "low" } }
+    : { type: "image_url" as const, image_url: { url: `data:${mimeType};base64,${imageBase64OrUrl}`, detail: "low" } };
 
   const userMessage = productTitle
     ? `Product title: "${productTitle}"\n\n${localeInstruction}`
@@ -152,7 +152,8 @@ export async function analyzeImage(
 
       // On rate limit, wait longer to let the rate window reset; on other API errors, shorter wait
       if (lastStatus === 429 || (apiError.status && apiError.status >= 400)) {
-        const waitMs = lastStatus === 429 ? 30000 * (attempt + 1) : 2000 * (attempt + 1);
+        // Keep retries short so the serverless function does not hit its timeout.
+        const waitMs = lastStatus === 429 ? 3000 * (attempt + 1) : 1000 * (attempt + 1);
         await new Promise((r) => setTimeout(r, waitMs));
       }
     }
