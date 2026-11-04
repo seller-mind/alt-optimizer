@@ -495,7 +495,9 @@ export default function GeneratePage() {
               <BlockStack gap="200">
                 <Text as="p">
                   {"generated" in actionData
-                    ? `Successfully generated ${actionData.generated} of ${actionData.total} alt texts.`
+                    ? generationType === "jsonld"
+                      ? `Structured data generated for ${actionData.generated} product${actionData.generated === 1 ? "" : "s"}.`
+                      : `Successfully generated ${actionData.generated} of ${(actionData as any).total ?? actionData.generated} alt texts.`
                     : "Operation completed successfully."}
                 </Text>
                 {"results" in actionData && actionData.results && (
