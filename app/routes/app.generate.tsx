@@ -54,7 +54,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         altTextOriginal: img.altTextOriginal,
         shopifyImageId: img.shopifyImageId,
         tagsAi: img.tagsAi,
-        needsGeneration: !img.altTextOriginal || img.status === "pending",
+        hasAiText: Boolean(img.altTextAi),
+        needsGeneration: !img.altTextAi,
       })),
     })),
     page,
@@ -594,7 +595,9 @@ export default function GeneratePage() {
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm" tone="subdued">
                     {generationType === "alt_text"
-                      ? `${totalCount} products in your catalog · ${eligibleCount} images need alt text`
+                      ? `${totalCount} products in your catalog · ${eligibleCount} ${
+                          eligibleCount === 1 ? "image needs" : "images need"
+                        } alt text`
                       : `${totalCount} products available`}
                   </Text>
                   <Button
@@ -673,9 +676,17 @@ export default function GeneratePage() {
                                 return <Badge tone="subdued">No image</Badge>;
                               }
                               const pending = product.images.filter((img) => img.needsGeneration).length;
+                              const awaiting = product.images.filter(
+                                (img) => img.hasAiText && img.status !== "applied"
+                              ).length;
+                              if (pending === 0 && awaiting > 0) {
+                                return <Badge tone="info">Pending review</Badge>;
+                              }
                               return (
                                 <Badge tone={pending > 0 ? "attention" : "success"}>
-                                  {pending > 0 ? `${pending} need generation` : "Complete"}
+                                  {pending > 0
+                                    ? `${pending} ${pending === 1 ? "image needs" : "images need"} generation`
+                                    : "Complete"}
                                 </Badge>
                               );
                             }
