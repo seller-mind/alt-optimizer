@@ -558,7 +558,7 @@ export default function GeneratePage() {
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm" tone="subdued">
                     {generationType === "alt_text"
-                      ? `${eligibleCount} images need generation across ${totalCount} products`
+                      ? `${totalCount} products in your catalog · ${eligibleCount} images need alt text`
                       : `${totalCount} products available`}
                   </Text>
                   <Button
@@ -595,10 +595,6 @@ export default function GeneratePage() {
               {products.length === 0 ? (
                 <Text as="p" alignment="center">
                   No products synced yet. Go to Products page and sync from Shopify.
-                </Text>
-              ) : generationType === "alt_text" && eligibleCount === 0 ? (
-                <Text as="p" alignment="center">
-                  All {totalCount} products already have alt text. No generation needed.
                 </Text>
               ) : (
                 <>
