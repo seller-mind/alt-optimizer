@@ -45,7 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where.hasJsonLd = true;
   }
 
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = 10;
   const rawPage = parseInt(url.searchParams.get("page") || "1", 10);
   const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
 

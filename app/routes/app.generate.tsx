@@ -25,18 +25,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const rawPage = parseInt(reqUrl.searchParams.get("page") || "1", 10);
   const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
 
-  const totalCount = await prisma.product.count({
-    where: {
-      shopId: shop.id,
-      imageCount: { gt: 0 },
-    },
-  });
+  // Alt text needs images; tags and JSON-LD only need product data.
+  const type = reqUrl.searchParams.get("type") || "alt_text";
+  const productWhere =
+    type === "alt_text"
+      ? { shopId: shop.id, imageCount: { gt: 0 } }
+      : { shopId: shop.id };
+
+  const totalCount = await prisma.product.count({ where: productWhere });
 
   const products = await prisma.product.findMany({
-    where: {
-      shopId: shop.id,
-      imageCount: { gt: 0 },
-    },
+    where: productWhere,
     include: {
       images: true,
     },
@@ -61,6 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     page,
     pageSize: PAGE_SIZE,
     totalCount,
+    type,
     quota,
     shopLocale: shop.locale,
     planType: shop.planType,
@@ -388,7 +388,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function GeneratePage() {
-  const { products, page, pageSize, totalCount, quota, shopLocale, planType } = useLoaderData<typeof loader>();
+  const { products, page, pageSize, totalCount, type, quota, shopLocale, planType } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
@@ -396,7 +396,7 @@ export default function GeneratePage() {
   const navigate = useNavigate();
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
-  const [generationType, setGenerationType] = useState<string>("alt_text");
+  const generationType = type;
   const [autoApply, setAutoApply] = useState<string>("false");
   const [showQuotaInfoModal, setShowQuotaInfoModal] = useState(false);
 
@@ -537,7 +537,7 @@ export default function GeneratePage() {
                     { label: "JSON-LD Structured Data", value: "jsonld" },
                   ]}
                   value={generationType}
-                  onChange={setGenerationType}
+                  onChange={(v) => navigate(`?type=${v}&page=1`)}
                 />
 
                 {generationType === "alt_text" && (
