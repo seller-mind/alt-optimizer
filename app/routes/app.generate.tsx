@@ -49,11 +49,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       id: p.id,
       title: p.title,
       handle: p.handle,
+      hasJsonLd: p.hasJsonLd,
       images: p.images.map((img) => ({
         id: img.id,
         src: img.src,
         altTextOriginal: img.altTextOriginal,
         shopifyImageId: img.shopifyImageId,
+        tagsAi: img.tagsAi,
         needsGeneration: !img.altTextOriginal || img.status === "pending",
       })),
     })),
@@ -316,8 +318,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     let productIds = formData.getAll("productIds") as string[];
 
     if (productIds.length === 0) {
+      // JSON-LD is built from product data, not images, so every product qualifies.
       const allProducts = await prisma.product.findMany({
-        where: { shopId: shop.id, imageCount: { gt: 0 } },
+        where: { shopId: shop.id },
         select: { id: true },
         orderBy: { id: "asc" },
         take: 500,
@@ -629,11 +632,32 @@ export default function GeneratePage() {
                           <Text as="p" variant="bodySm" tone="subdued">/{product.handle}</Text>
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Badge tone={product.images.filter(img => img.needsGeneration).length > 0 ? "attention" : "success"}>
-                            {product.images.filter(img => img.needsGeneration).length > 0
-                              ? `${product.images.filter(img => img.needsGeneration).length} need generation`
-                              : "Complete"}
-                          </Badge>
+                          {(() => {
+                            if (generationType === "alt_text") {
+                              const pending = product.images.filter((img) => img.needsGeneration).length;
+                              return (
+                                <Badge tone={pending > 0 ? "attention" : "success"}>
+                                  {pending > 0 ? `${pending} need generation` : "Complete"}
+                                </Badge>
+                              );
+                            }
+                            if (generationType === "tags") {
+                              if (product.images.length === 0) {
+                                return <Badge tone="subdued">No image</Badge>;
+                              }
+                              const done = product.images.some((img) => img.tagsAi);
+                              return (
+                                <Badge tone={done ? "success" : "attention"}>
+                                  {done ? "Complete" : "Not generated"}
+                                </Badge>
+                              );
+                            }
+                            return (
+                              <Badge tone={product.hasJsonLd ? "success" : "attention"}>
+                                {product.hasJsonLd ? "Complete" : "Not generated"}
+                              </Badge>
+                            );
+                          })()}
                         </IndexTable.Cell>
                       </IndexTable.Row>
                     ))}
@@ -643,9 +667,9 @@ export default function GeneratePage() {
                     <InlineStack align="center">
                       <Pagination
                         hasPrevious={page > 1}
-                        onPrevious={() => navigate(`?page=${page - 1}`)}
+                        onPrevious={() => navigate(`?type=${type}&page=${page - 1}`)}
                         hasNext={page < totalPages}
-                        onNext={() => navigate(`?page=${page + 1}`)}
+                        onNext={() => navigate(`?type=${type}&page=${page + 1}`)}
                         label={`Page ${page} of ${totalPages}`}
                       />
                     </InlineStack>
