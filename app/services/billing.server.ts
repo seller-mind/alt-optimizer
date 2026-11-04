@@ -91,6 +91,7 @@ export async function checkQuota(
   canGenerate: boolean;
   remaining: number;
   quota: number;
+  percentage: number;
   planName: string;
   planType: string;
   warning: boolean;
@@ -104,6 +105,7 @@ export async function checkQuota(
     canGenerate: usage.remaining > 0,
     remaining: usage.remaining,
     quota: plan.monthlyQuota,
+    percentage: usage.percentage,
     planName: plan.name,
     planType: usage.planType,
     warning: usage.percentage >= 80,
