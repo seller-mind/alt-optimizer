@@ -122,6 +122,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       imageIds = targetImages.map((img) => String(img.id));
     }
 
+    if (imageIds.length === 0) {
+      return json({
+        success: false,
+        generated: 0,
+        total: 0,
+        results: [],
+        error:
+          "No images matched your selection. Select a product row to regenerate its alt text.",
+      });
+    }
+
     const results: Array<{
       imageId: number;
       imageSrc?: string;
@@ -603,13 +614,7 @@ export default function GeneratePage() {
                   <Button
                     variant="primary"
                     onClick={handleGenerate}
-                    disabled={
-                      isGenerating ||
-                      (generationType === "alt_text" &&
-                        eligibleCount === 0 &&
-                        selectedCount === 0) ||
-                      quota.remaining <= 0
-                    }
+                    disabled={isGenerating || quota.remaining <= 0}
                     loading={isGenerating}
                   >
                     {isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`}
