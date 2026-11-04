@@ -109,7 +109,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             scope === "all" || productIds.length === 0
               ? { shopId: shop.id, imageCount: { gt: 0 } }
               : { shopId: shop.id, id: { in: productIds } },
-          OR: [{ altTextOriginal: null }, { status: "pending" }],
+          // When the merchant picked specific products, regenerate even if alt text exists.
+          ...(scope === "all" || productIds.length === 0
+            ? { OR: [{ altTextOriginal: null }, { status: "pending" }] }
+            : {}),
         },
         select: { id: true },
         orderBy: { id: "asc" },
@@ -566,7 +569,9 @@ export default function GeneratePage() {
                     onClick={handleGenerate}
                     disabled={
                       isGenerating ||
-                      (generationType === "alt_text" && eligibleCount === 0) ||
+                      (generationType === "alt_text" &&
+                        eligibleCount === 0 &&
+                        selectedCount === 0) ||
                       quota.remaining <= 0
                     }
                     loading={isGenerating}
