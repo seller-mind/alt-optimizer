@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useActionData, useSubmit, useNavigation } from "@remix-run/react";
+import { useLoaderData, useActionData, useSubmit, useNavigation, useNavigate } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -16,6 +16,7 @@ import {
   SkeletonBodyText,
   Toast,
   Box,
+  Pagination,
 } from "@shopify/polaris";
 import { useState, useCallback, useEffect } from "react";
 import { authenticate } from "~/shopify.server";
@@ -44,6 +45,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where.hasJsonLd = true;
   }
 
+  const PAGE_SIZE = 20;
+  const rawPage = parseInt(url.searchParams.get("page") || "1", 10);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+
+  const totalCount = await prisma.product.count({ where });
+
   const products = await prisma.product.findMany({
     where,
     include: {
@@ -51,7 +58,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       _count: { select: { images: true } },
     },
     orderBy: { title: "asc" },
-    take: 100,
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
   });
 
   return {
@@ -67,7 +75,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       missingAltCount: p.images.filter((img) => img.altTextOriginal === null).length,
     })),
     filter,
-    totalProducts: products.length,
+    totalCount,
+    page,
+    pageSize: PAGE_SIZE,
   };
 };
 
@@ -92,7 +102,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function ProductsPage() {
-  const { products, filter, totalProducts } = useLoaderData<typeof loader>();
+  const { products, filter, totalCount, page, pageSize } = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const actionData = useActionData<{ success?: boolean; synced?: number; error?: string }>();
   const submit = useSubmit();
   const navigation = useNavigation();
@@ -173,7 +185,7 @@ export default function ProductsPage() {
   return (
     <Page
       title="Products"
-      subtitle={`${totalProducts} products found`}
+      subtitle={`${totalCount} products found`}
       primaryAction={
         <Button variant="primary" onClick={handleSync} disabled={isSyncing} loading={isSyncing}>
           {isSyncing ? "Syncing\u2026" : "Sync from Shopify"}
@@ -188,7 +200,7 @@ export default function ProductsPage() {
               <InlineStack align="space-between" blockAlign="center">
                 <InlineStack gap="200" blockAlign="center">
                   <Text as="h2" variant="headingMd">Product Inventory</Text>
-                  <Badge tone="info">v2.0.0-FIXED</Badge>
+                  <Badge tone="subdued">{totalCount} products</Badge>
                 </InlineStack>
                 <Select
                   label=""
@@ -323,6 +335,17 @@ export default function ProductsPage() {
                       </InlineStack>
                     );
                   })}
+                  {totalPages > 1 && (
+                    <InlineStack align="center" paddingBlockStart="300">
+                      <Pagination
+                        hasPrevious={page > 1}
+                        onPrevious={() => navigate(`?filter=${filter}&page=${page - 1}`)}
+                        hasNext={page < totalPages}
+                        onNext={() => navigate(`?filter=${filter}&page=${page + 1}`)}
+                        label={`Page ${page} of ${totalPages}`}
+                      />
+                    </InlineStack>
+                  )}
                 </BlockStack>
               )}
             </BlockStack>
