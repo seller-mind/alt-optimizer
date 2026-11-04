@@ -1,9 +1,17 @@
-import { Outlet, useRouteError } from "@remix-run/react";
+import { json } from "@remix-run/node";
+import { Outlet, useRouteError, useLoaderData } from "@remix-run/react";
 import { Box, InlineStack, Text, Card, BlockStack } from "@shopify/polaris";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppNav } from "~/components/AppNav";
 
+export const loader = async () => {
+  // Surfaces the exact build being served so a stale iframe/cache is obvious.
+  const sha = (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 7);
+  return json({ build: sha || "local" });
+};
+
 export default function AppLayout() {
+  const { build } = useLoaderData<typeof loader>();
   return (
     <Box minHeight="100vh" display="flex" flexDirection="column">
       <AppNav />
@@ -17,7 +25,7 @@ export default function AppLayout() {
       >
         <InlineStack align="center" blockAlign="center">
           <Text as="p" variant="bodySm" tone="subdued">
-            AltOptimizer v2.1.1
+            AltOptimizer v2.1.1 · build {build}
           </Text>
         </InlineStack>
       </Box>
