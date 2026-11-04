@@ -55,6 +55,19 @@ export function ErrorBoundary() {
 
   console.error("[AltOptimizer] ErrorBoundary caught:", error);
 
+  // TEMP DIAGNOSTIC: surface the real error so the failure can be pinpointed.
+  let detail = "";
+  try {
+    if (error instanceof Error) {
+      detail = `${error.name}: ${error.message}`;
+      if (error.stack) detail += ` | ${error.stack.split("\n").slice(0, 3).join(" << ")}`;
+    } else {
+      detail = JSON.stringify(error);
+    }
+  } catch {
+    detail = String(error);
+  }
+
   return (
     <Box padding="600">
       <Card>
@@ -64,6 +77,9 @@ export function ErrorBoundary() {
           </Text>
           <Text as="p" variant="bodyMd">
             An unexpected error occurred. Please try refreshing the page.
+          </Text>
+          <Text as="p" variant="bodySm" tone="critical">
+            [debug] {detail}
           </Text>
           <Text as="p" variant="bodySm" tone="subdued">
             If the problem persists, contact support through the Shopify App Store.
