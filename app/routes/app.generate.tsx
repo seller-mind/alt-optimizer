@@ -4,7 +4,7 @@ import { useLoaderData, useActionData, useSubmit, useNavigation, useNavigate } f
 import {
   Page, Layout, Card, Text, Button, BlockStack, InlineStack,
   Select, Banner, ProgressBar, Badge, Thumbnail, IndexTable,
-  FormLayout, ChoiceList, List, Modal, Pagination,
+  FormLayout, ChoiceList, List, Modal, Pagination, Box,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
@@ -313,7 +313,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "generate_jsonld") {
-    const productIds = formData.getAll("productIds") as string[];
+    let productIds = formData.getAll("productIds") as string[];
+
+    if (productIds.length === 0) {
+      const allProducts = await prisma.product.findMany({
+        where: { shopId: shop.id, imageCount: { gt: 0 } },
+        select: { id: true },
+        orderBy: { id: "asc" },
+        take: 500,
+      });
+      productIds = allProducts.map((p) => String(p.id));
+    }
+
     let successCount = 0;
 
     for (const productIdStr of productIds) {
@@ -635,6 +646,18 @@ export default function GeneratePage() {
                     </InlineStack>
                   )}
 
+                  {actionData?.success && !("results" in actionData) && "generated" in actionData && (
+                    <Banner
+                      tone="success"
+                      title={`JSON-LD structured data generated for ${(actionData as any).generated} product(s)`}
+                    >
+                      <Text as="p">
+                        Structured data has been saved to your products and injected into your storefront theme.
+                        Visit any product page to see the JSON-LD in the page source.
+                      </Text>
+                    </Banner>
+                  )}
+
                   {/* Generation Results with Retry */}
                   {actionData?.success && "results" in actionData && actionData.results && (
                     <Card>
@@ -642,6 +665,35 @@ export default function GeneratePage() {
                         <Text as="h3" variant="headingSm">
                           Generation Results ({actionData.results.filter((r: any) => r.success).length} succeeded, {actionData.results.filter((r: any) => !r.success).length} failed)
                         </Text>
+
+                        {actionData.results.filter((r: any) => r.success).length > 0 && (
+                          <BlockStack gap="150">
+                            {actionData.results.filter((r: any) => r.success).map((r: any) => (
+                              <Box
+                                key={r.imageId || r.productId}
+                                padding="200"
+                                borderWidth="025"
+                                borderRadius="200"
+                                background="bg-surface-secondary"
+                              >
+                                <BlockStack gap="100">
+                                  <Text as="p" variant="bodySm" fontWeight="semibold">
+                                    {r.productTitle || `Image #${r.imageId}`}
+                                  </Text>
+                                  {Array.isArray(r.tags) && r.tags.length > 0 ? (
+                                    <InlineStack gap="100" wrap>
+                                      {r.tags.map((t: string) => (
+                                        <Badge key={t} tone="info">{t}</Badge>
+                                      ))}
+                                    </InlineStack>
+                                  ) : r.altText ? (
+                                    <Text as="p" variant="bodySm" tone="subdued">{r.altText}</Text>
+                                  ) : null}
+                                </BlockStack>
+                              </Box>
+                            ))}
+                          </BlockStack>
+                        )}
 
                         {actionData.results.filter((r: any) => !r.success).length > 0 && (
                           <>
