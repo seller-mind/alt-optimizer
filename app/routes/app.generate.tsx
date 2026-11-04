@@ -1,10 +1,10 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useActionData, useSubmit, useNavigation } from "@remix-run/react";
+import { useLoaderData, useActionData, useSubmit, useNavigation, useNavigate } from "@remix-run/react";
 import {
   Page, Layout, Card, Text, Button, BlockStack, InlineStack,
   Select, Banner, ProgressBar, Badge, Thumbnail, IndexTable,
-  FormLayout, ChoiceList, List, Modal,
+  FormLayout, ChoiceList, List, Modal, Pagination,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
 import { authenticate } from "~/shopify.server";
@@ -20,6 +20,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const quota = await checkQuota(shop.id);
 
+  const PAGE_SIZE = 10;
+  const reqUrl = new URL(request.url);
+  const rawPage = parseInt(reqUrl.searchParams.get("page") || "1", 10);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+
+  const totalCount = await prisma.product.count({
+    where: {
+      shopId: shop.id,
+      imageCount: { gt: 0 },
+    },
+  });
+
   const products = await prisma.product.findMany({
     where: {
       shopId: shop.id,
@@ -29,7 +41,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       images: true,
     },
     orderBy: { title: "asc" },
-    take: 50,
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
   });
 
   return {
@@ -45,6 +58,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         needsGeneration: !img.altTextOriginal || img.status === "pending",
       })),
     })),
+    page,
+    pageSize: PAGE_SIZE,
+    totalCount,
     quota,
     shopLocale: shop.locale,
     planType: shop.planType,
@@ -77,8 +93,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "generate_alt") {
-    const imageIds = formData.getAll("imageIds") as string[];
+    let imageIds = formData.getAll("imageIds") as string[];
     const autoApply = formData.get("autoApply") === "true";
+
+    if (imageIds.length === 0) {
+      const scope = formData.get("scope");
+      const productIdsRaw = formData.getAll("productIds") as string[];
+      const productIds = productIdsRaw
+        .map((v) => parseInt(v, 10))
+        .filter((v) => Number.isFinite(v));
+
+      const targetImages = await prisma.productImage.findMany({
+        where: {
+          product:
+            scope === "all" || productIds.length === 0
+              ? { shopId: shop.id, imageCount: { gt: 0 } }
+              : { shopId: shop.id, id: { in: productIds } },
+          OR: [{ altTextOriginal: null }, { status: "pending" }],
+        },
+        select: { id: true },
+        orderBy: { id: "asc" },
+        take: 500,
+      });
+      imageIds = targetImages.map((img) => String(img.id));
+    }
 
     const results: Array<{
       imageId: number;
@@ -193,7 +231,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "generate_tags") {
-    const productIds = formData.getAll("productIds") as string[];
+    let productIds = formData.getAll("productIds") as string[];
+
+    if (productIds.length === 0) {
+      const allProducts = await prisma.product.findMany({
+        where: { shopId: shop.id, imageCount: { gt: 0 } },
+        select: { id: true },
+        orderBy: { id: "asc" },
+        take: 500,
+      });
+      productIds = allProducts.map((p) => String(p.id));
+    }
 
     const results: Array<{
       productId: number;
@@ -329,24 +377,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function GeneratePage() {
-  const { products, quota, shopLocale, planType } = useLoaderData<typeof loader>();
+  const { products, page, pageSize, totalCount, quota, shopLocale, planType } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isGenerating = navigation.state !== "idle";
+  const navigate = useNavigate();
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const [generationType, setGenerationType] = useState<string>("alt_text");
   const [autoApply, setAutoApply] = useState<string>("false");
   const [showQuotaInfoModal, setShowQuotaInfoModal] = useState(false);
 
-  const allImageIds = products.flatMap((p) => p.images.filter(img => img.needsGeneration).map((img) => String(img.id)));
   const eligibleCount = products.reduce((sum, p) => sum + p.images.filter(img => img.needsGeneration).length, 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const handleSelectionChange = useCallback((newSelectedResources: string[]) => {
-    setSelectedIds(new Set(newSelectedResources));
-  }, []);
+    const currentPageIds = new Set(products.map((p) => String(p.id)));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      currentPageIds.forEach((id) => {
+        if (!newSelectedResources.includes(id)) next.delete(id);
+      });
+      newSelectedResources.forEach((id) => next.add(id));
+      return next;
+    });
+  }, [products]);
   const selectedCount = selectedIds.size;
-  const allSelected = products.length > 0 && selectedCount === products.length;
 
   // Show quota info modal when quota exceeded
   const showQuotaModal = actionData && !actionData.success && (actionData as any).quotaExceeded;
@@ -356,26 +412,14 @@ export default function GeneratePage() {
     formData.set("intent", generationType === "alt_text" ? "generate_alt" : generationType === "tags" ? "generate_tags" : "generate_jsonld");
     formData.set("autoApply", autoApply);
 
-    if (generationType === "alt_text") {
-      const selectedImageIds = selectedIds.size > 0
-        ? products
-            .filter((p) => selectedIds.has(String(p.id)))
-            .flatMap((p) => p.images.filter(img => img.needsGeneration).map((img) => String(img.id)))
-        : allImageIds;
-
-      if (selectedImageIds.length === 0) return;
-      selectedImageIds.forEach((id) => formData.append("imageIds", id));
+    if (selectedIds.size > 0) {
+      selectedIds.forEach((id) => formData.append("productIds", id));
     } else {
-      const selectedProductIds = selectedIds.size > 0
-        ? Array.from(selectedIds)
-        : products.map((p) => String(p.id));
-
-      if (selectedProductIds.length === 0) return;
-      selectedProductIds.forEach((id) => formData.append("productIds", id));
+      formData.set("scope", "all");
     }
 
     submit(formData, { method: "post" });
-  }, [generationType, autoApply, selectedIds, products, allImageIds, submit]);
+  }, [generationType, autoApply, selectedIds, submit]);
 
   return (
     <Page title="AI Generation" subtitle="Generate alt text, tags, and structured data">
@@ -520,8 +564,13 @@ export default function GeneratePage() {
             <BlockStack gap="400">
               <Text as="h2" variant="headingMd">Eligible Products</Text>
               <Text as="p" variant="bodySm" tone="subdued">
-                Select specific products or leave all selected to generate for all eligible items.
+                Select specific products below, or leave everything unselected to generate for all eligible products.
               </Text>
+              {totalPages > 1 && (
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Showing {products.length} of {totalCount} products. Use the pagination controls below the table to reach the rest.
+                </Text>
+              )}
 
               {products.length === 0 ? (
                 <Text as="p" alignment="center">
@@ -529,14 +578,15 @@ export default function GeneratePage() {
                 </Text>
               ) : eligibleCount === 0 ? (
                 <Text as="p" alignment="center">
-                  All {products.length} products already have alt text. No generation needed.
+                  All {totalCount} products already have alt text. No generation needed.
                 </Text>
               ) : (
                 <>
                   <IndexTable
+                    condensed
                     resourceName={{ singular: "product", plural: "products" }}
                     itemCount={products.length}
-                    selectedItemsCount={allSelected ? "All" : selectedCount}
+                    selectedItemsCount={selectedCount}
                     headings={[
                       { title: "Image" },
                       { title: "Product" },
@@ -572,6 +622,18 @@ export default function GeneratePage() {
                       </IndexTable.Row>
                     ))}
                   </IndexTable>
+
+                  {totalPages > 1 && (
+                    <InlineStack align="center">
+                      <Pagination
+                        hasPrevious={page > 1}
+                        onPrevious={() => navigate(`?page=${page - 1}`)}
+                        hasNext={page < totalPages}
+                        onNext={() => navigate(`?page=${page + 1}`)}
+                        label={`Page ${page} of ${totalPages}`}
+                      />
+                    </InlineStack>
+                  )}
 
                   {/* Generation Results with Retry */}
                   {actionData?.success && "results" in actionData && actionData.results && (
