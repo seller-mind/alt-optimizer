@@ -554,12 +554,18 @@ export default function GeneratePage() {
 
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    {eligibleCount} images need generation across {products.length} products
+                    {generationType === "alt_text"
+                      ? `${eligibleCount} images need generation across ${products.length} products`
+                      : `${products.length} products available`}
                   </Text>
                   <Button
                     variant="primary"
                     onClick={handleGenerate}
-                    disabled={isGenerating || eligibleCount === 0 || quota.remaining <= 0}
+                    disabled={
+                      isGenerating ||
+                      (generationType === "alt_text" && eligibleCount === 0) ||
+                      quota.remaining <= 0
+                    }
                     loading={isGenerating}
                   >
                     {isGenerating ? "Generating..." : `Generate ${generationType === "alt_text" ? "Alt Text" : generationType === "tags" ? "Tags" : "JSON-LD"}`}
@@ -587,7 +593,7 @@ export default function GeneratePage() {
                 <Text as="p" alignment="center">
                   No products synced yet. Go to Products page and sync from Shopify.
                 </Text>
-              ) : eligibleCount === 0 ? (
+              ) : generationType === "alt_text" && eligibleCount === 0 ? (
                 <Text as="p" alignment="center">
                   All {totalCount} products already have alt text. No generation needed.
                 </Text>
