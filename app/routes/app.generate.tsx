@@ -406,21 +406,45 @@ export default function GeneratePage() {
 
   const eligibleCount = products.reduce((sum, p) => sum + p.images.filter(img => img.needsGeneration).length, 0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Polaris 12 IndexTable signature:
+  // onSelectionChange(selectionType, toggleType, selection?, position?)
+  //   selectionType: "all" | "page" | "multi" | "single" | "range"
+  //   selection: single id (string) or [startIndex, endIndex] for page/range
   const handleSelectionChange = useCallback(
-    (newSelectedResources: string[] | "All" | "Page") => {
-      const currentPageIds = new Set(products.map((p) => String(p.id)));
-      // Polaris passes "All" / "Page" for header checkboxes, and a string[] for rows.
-      const selectedArray: string[] = Array.isArray(newSelectedResources)
-        ? newSelectedResources
-        : newSelectedResources === "All" || newSelectedResources === "Page"
-        ? Array.from(currentPageIds)
-        : [];
+    (
+      selectionType: "all" | "page" | "multi" | "single" | "range",
+      toggleType: boolean,
+      selection?: string | [number, number]
+    ) => {
+      const pageIds = products.map((p) => String(p.id));
       setSelectedIds((prev) => {
         const next = new Set(prev);
-        currentPageIds.forEach((id) => {
-          if (!selectedArray.includes(id)) next.delete(id);
-        });
-        selectedArray.forEach((id) => next.add(id));
+
+        if (selectionType === "all" || selectionType === "page") {
+          pageIds.forEach((id) =>
+            toggleType ? next.add(id) : next.delete(id)
+          );
+          return next;
+        }
+
+        if (selectionType === "single" || selectionType === "multi") {
+          if (typeof selection === "string") {
+            if (toggleType) next.add(selection);
+            else next.delete(selection);
+          }
+          return next;
+        }
+
+        if (selectionType === "range" && Array.isArray(selection)) {
+          for (let i = selection[0]; i <= selection[1]; i++) {
+            const id = pageIds[i];
+            if (!id) continue;
+            if (toggleType) next.add(id);
+            else next.delete(id);
+          }
+          return next;
+        }
+
         return next;
       });
     },
