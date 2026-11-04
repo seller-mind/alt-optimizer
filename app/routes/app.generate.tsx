@@ -25,12 +25,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const rawPage = parseInt(reqUrl.searchParams.get("page") || "1", 10);
   const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
 
-  // Alt text needs images; tags and JSON-LD only need product data.
+  // Every product is always listed so the merchant can see the full catalog.
+  // Products without images are shown with a "No image" status instead of being hidden.
   const type = reqUrl.searchParams.get("type") || "alt_text";
-  const productWhere =
-    type === "alt_text"
-      ? { shopId: shop.id, imageCount: { gt: 0 } }
-      : { shopId: shop.id };
+  const productWhere = { shopId: shop.id };
 
   const totalCount = await prisma.product.count({ where: productWhere });
 
@@ -560,8 +558,8 @@ export default function GeneratePage() {
                 <InlineStack gap="200" align="space-between">
                   <Text as="p" variant="bodySm" tone="subdued">
                     {generationType === "alt_text"
-                      ? `${eligibleCount} images need generation across ${products.length} products`
-                      : `${products.length} products available`}
+                      ? `${eligibleCount} images need generation across ${totalCount} products`
+                      : `${totalCount} products available`}
                   </Text>
                   <Button
                     variant="primary"
@@ -621,6 +619,7 @@ export default function GeneratePage() {
                         key={product.id}
                         selected={selectedIds.has(String(product.id))}
                         position={index}
+                        disabled={generationType === "alt_text" && product.images.length === 0}
                       >
                         <IndexTable.Cell>
                           <Thumbnail
@@ -636,6 +635,9 @@ export default function GeneratePage() {
                         <IndexTable.Cell>
                           {(() => {
                             if (generationType === "alt_text") {
+                              if (product.images.length === 0) {
+                                return <Badge tone="subdued">No image</Badge>;
+                              }
                               const pending = product.images.filter((img) => img.needsGeneration).length;
                               return (
                                 <Badge tone={pending > 0 ? "attention" : "success"}>
