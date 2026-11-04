@@ -600,7 +600,6 @@ export default function GeneratePage() {
               ) : (
                 <>
                   <IndexTable
-                    condensed
                     resourceName={{ singular: "product", plural: "products" }}
                     itemCount={products.length}
                     selectedItemsCount={selectedCount}
