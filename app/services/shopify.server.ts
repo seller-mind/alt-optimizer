@@ -40,6 +40,32 @@ export async function fetchProducts(
   admin: any,
   cursor: string | null = null
 ): Promise<ProductListResult> {
+  // Try the full query (variant media included) first. If Shopify rejects it —
+  // requested cost over the 1,000-point single-query ceiling, or the nested
+  // variant -> media connection trips a 5xx — fall back to the original query.
+  // A sync must never fail merely because variant images were unreadable.
+  try {
+    return await runProductsQuery(admin, cursor, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      "[AltOptimizer] full product query failed, retrying without variant media:",
+      message
+    );
+    return await runProductsQuery(admin, cursor, false);
+  }
+}
+
+async function runProductsQuery(
+  admin: any,
+  cursor: string | null,
+  includeVariantMedia: boolean
+): Promise<ProductListResult> {
+  const variantMediaField = includeVariantMedia
+    ? `media(first: 3) { nodes { ... on MediaImage { id alt image { url width height } } mediaContentType } }`
+    : "";
+  const variantLimit = includeVariantMedia ? 20 : 5;
+
   const response = await admin.graphql(
     `query FetchProducts($first: Int!, $after: String) {
       products(first: $first, after: $after) {
@@ -68,7 +94,7 @@ export async function fetchProducts(
                 mediaContentType
               }
             }
-            variants(first: 20) {
+            variants(first: ${variantLimit}) {
               edges {
                 node {
                   id
@@ -76,20 +102,7 @@ export async function fetchProducts(
                   price
                   sku
                   compareAtPrice
-                  media(first: 3) {
-                    nodes {
-                      ... on MediaImage {
-                        id
-                        alt
-                        image {
-                          url
-                          width
-                          height
-                        }
-                      }
-                      mediaContentType
-                    }
-                  }
+                  ${variantMediaField}
                 }
               }
             }
