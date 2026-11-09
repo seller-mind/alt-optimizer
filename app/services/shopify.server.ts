@@ -54,7 +54,7 @@ export async function fetchProducts(
             productType
             tags
             status
-            media(first: 250) {
+            media(first: 50) {
               nodes {
                 ... on MediaImage {
                   id
@@ -68,7 +68,7 @@ export async function fetchProducts(
                 mediaContentType
               }
             }
-            variants(first: 100) {
+            variants(first: 20) {
               edges {
                 node {
                   id
@@ -76,11 +76,16 @@ export async function fetchProducts(
                   price
                   sku
                   compareAtPrice
-                  media(first: 10) {
+                  media(first: 3) {
                     nodes {
                       ... on MediaImage {
                         id
                         alt
+                        image {
+                          url
+                          width
+                          height
+                        }
                       }
                       mediaContentType
                     }
@@ -105,6 +110,31 @@ export async function fetchProducts(
   );
 
   const data = await response.json();
+
+  // Surface Shopify GraphQL errors instead of a bare TypeError downstream.
+  if (data.errors?.length) {
+    console.error(
+      "[AltOptimizer] fetchProducts GraphQL errors:",
+      JSON.stringify(data.errors)
+    );
+    throw new Error(
+      `Shopify GraphQL error: ${data.errors[0]?.message || "unknown"}`
+    );
+  }
+
+  // Log query cost so the 1000-point single-query ceiling can be monitored.
+  const cost = data.extensions?.cost;
+  if (cost) {
+    console.log(
+      "[AltOptimizer] GraphQL cost",
+      JSON.stringify({
+        requested: cost.requestedQueryCost,
+        actual: cost.actualQueryCost,
+        available: cost.throttleStatus?.currentlyAvailable,
+      })
+    );
+  }
+
   const products = data.data.products.edges.map((edge: any) => {
     const variantEdges = edge.node.variants.edges;
 
@@ -129,6 +159,24 @@ export async function fetchProducts(
         height: node.image.height,
         variantTitles: variantMediaMap.get(node.id) || [],
       }));
+
+    // Backfill variant images that fell outside the first 50 product media.
+    const seenImageIds = new Set(images.map((img) => img.id));
+    for (const v of variantEdges) {
+      for (const m of v.node.media?.nodes || []) {
+        if (m.mediaContentType !== "IMAGE" || !m.image) continue;
+        if (seenImageIds.has(m.id)) continue;
+        seenImageIds.add(m.id);
+        images.push({
+          id: m.id,
+          src: m.image.url,
+          altText: m.alt ? m.alt : null,
+          width: m.image.width,
+          height: m.image.height,
+          variantTitles: variantMediaMap.get(m.id) || [],
+        });
+      }
+    }
 
     return {
       id: edge.node.id,
