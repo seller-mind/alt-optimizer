@@ -96,6 +96,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shopifyProductId: img.product.shopifyProductId,
       productTitle: img.product.title,
       productHandle: img.product.handle,
+      isVariantImage: img.isVariantImage,
+      variantTitles: img.variantTitles,
     })),
     filter,
     statusCounts,
@@ -556,9 +558,16 @@ export default function ReviewPage() {
                           />
                         </IndexTable.Cell>
                         <IndexTable.Cell>
-                          <Text as="p" variant="bodyMd" fontWeight="semibold" truncate>
-                            {image.productTitle}
-                          </Text>
+                          <BlockStack gap="050">
+                            <Text as="p" variant="bodyMd" fontWeight="semibold" truncate>
+                              {image.productTitle}
+                            </Text>
+                            {image.isVariantImage && (
+                              <InlineStack gap="100">
+                                <Badge tone="info" size="small">Variant image</Badge>
+                              </InlineStack>
+                            )}
+                          </BlockStack>
                         </IndexTable.Cell>
                         <IndexTable.Cell>
                           {image.altTextOriginal ? (

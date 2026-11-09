@@ -4,7 +4,7 @@ client_id = "bf1b9b6eef0ca0ed0584705f23681ddd"
 application_url = "https://alt-optimizer.vercel.app"
 embedded = true
 name = "AltOptimizer"
-description = "AI-powered product image optimizer. Generate SEO-optimized alt text, product tags, and JSON-LD structured data for your Shopify store."
+description = "Make your product images readable to AI. Find the images ChatGPT and Google cannot understand, then fix them with SEO-optimized alt text, product tags, and JSON-LD structured data."
 
 [build]
 dev_store_url = ""
@@ -16,7 +16,7 @@ redirect_urls = [
 ]
 
 [access_scopes]
-scopes = "read_products,write_products,read_themes,write_themes"
+scopes = "read_products,write_products,read_themes,write_themes,read_files,write_files"
 
 [webhooks]
 api_version = "2026-07"

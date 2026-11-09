@@ -36,6 +36,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     imagesWithAlt: 0,
     imagesWithAi: 0,
     imagesPending: 0,
+    variantImages: 0,
+    variantImagesWithoutAlt: 0,
     totalGenerated: 0,
     totalApiCalls: 0,
   };
@@ -219,7 +221,7 @@ export default function DashboardIndex() {
 
         {/* Stats Cards */}
         <Layout.Section>
-          <Grid columns={{ xs: 1, sm: 2, md: 4, lg: 4, xl: 4 }}>
+          <Grid columns={{ xs: 1, sm: 2, md: 3, lg: 5, xl: 5 }}>
             <Grid.Cell>
               <Card>
                 <BlockStack gap="200">
@@ -278,6 +280,25 @@ export default function DashboardIndex() {
                       <Text as="p" variant="bodySm" tone="success">All reviewed</Text>
                     ) : (
                       <Text as="p" variant="bodySm" tone="subdued">No generations yet</Text>
+                    )}
+                  </Box>
+                </BlockStack>
+              </Card>
+            </Grid.Cell>
+            <Grid.Cell>
+              <Card>
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodySm" tone="subdued">Variant Images</Text>
+                  <Text as="h1" variant="heading2xl">{stats.variantImages}</Text>
+                  <Box minHeight="20px">
+                    {stats.variantImagesWithoutAlt > 0 ? (
+                      <Text as="p" variant="bodySm" tone="critical">
+                        {stats.variantImagesWithoutAlt} invisible to AI
+                      </Text>
+                    ) : stats.variantImages > 0 ? (
+                      <Text as="p" variant="bodySm" tone="success">All variant images readable</Text>
+                    ) : (
+                      <Text as="p" variant="bodySm" tone="subdued">No variant images</Text>
                     )}
                   </Box>
                 </BlockStack>

@@ -78,6 +78,8 @@ model ProductImage {
   status           String @default("pending") // pending, approved, rejected, applied
   tagsOriginal     String? @map("tags_original")
   tagsAi           String? @map("tags_ai")
+  isVariantImage   Boolean @default(false) @map("is_variant_image")
+  variantTitles    String? @map("variant_titles")
 
   product Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
   history AltTextHistory[]

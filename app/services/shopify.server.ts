@@ -19,6 +19,8 @@ interface ShopifyImage {
   altText: string | null;
   width?: number;
   height?: number;
+  /** Titles of variants that reference this image. Empty = not variant-specific. */
+  variantTitles: string[];
 }
 
 interface ShopifyVariant {
@@ -52,7 +54,7 @@ export async function fetchProducts(
             productType
             tags
             status
-            media(first: 50) {
+            media(first: 250) {
               nodes {
                 ... on MediaImage {
                   id
@@ -66,7 +68,7 @@ export async function fetchProducts(
                 mediaContentType
               }
             }
-            variants(first: 5) {
+            variants(first: 100) {
               edges {
                 node {
                   id
@@ -74,6 +76,15 @@ export async function fetchProducts(
                   price
                   sku
                   compareAtPrice
+                  media(first: 10) {
+                    nodes {
+                      ... on MediaImage {
+                        id
+                        alt
+                      }
+                      mediaContentType
+                    }
+                  }
                 }
               }
             }
@@ -94,16 +105,21 @@ export async function fetchProducts(
   );
 
   const data = await response.json();
-  const products = data.data.products.edges.map((edge: any) => ({
-    id: edge.node.id,
-    title: edge.node.title,
-    handle: edge.node.handle,
-    description: edge.node.description || "",
-    vendor: edge.node.vendor || "",
-    productType: edge.node.productType || "",
-    tags: edge.node.tags || [],
-    status: edge.node.status,
-    images: edge.node.media.nodes
+  const products = data.data.products.edges.map((edge: any) => {
+    const variantEdges = edge.node.variants.edges;
+
+    // mediaId -> titles of variants referencing it
+    const variantMediaMap = new Map<string, string[]>();
+    for (const v of variantEdges) {
+      for (const m of v.node.media?.nodes || []) {
+        if (m.mediaContentType !== "IMAGE") continue;
+        const list = variantMediaMap.get(m.id) || [];
+        list.push(v.node.title);
+        variantMediaMap.set(m.id, list);
+      }
+    }
+
+    const images: ShopifyImage[] = edge.node.media.nodes
       .filter((node: any) => node.mediaContentType === "IMAGE" && node.image)
       .map((node: any) => ({
         id: node.id,
@@ -111,15 +127,28 @@ export async function fetchProducts(
         altText: node.alt ? node.alt : null,
         width: node.image.width,
         height: node.image.height,
+        variantTitles: variantMediaMap.get(node.id) || [],
+      }));
+
+    return {
+      id: edge.node.id,
+      title: edge.node.title,
+      handle: edge.node.handle,
+      description: edge.node.description || "",
+      vendor: edge.node.vendor || "",
+      productType: edge.node.productType || "",
+      tags: edge.node.tags || [],
+      status: edge.node.status,
+      images,
+      variants: variantEdges.map((v: any) => ({
+        id: v.node.id,
+        title: v.node.title,
+        price: v.node.price,
+        sku: v.node.sku,
+        compareAtPrice: v.node.compareAtPrice,
       })),
-    variants: edge.node.variants.edges.map((v: any) => ({
-      id: v.node.id,
-      title: v.node.title,
-      price: v.node.price,
-      sku: v.node.sku,
-      compareAtPrice: v.node.compareAtPrice,
-    })),
-  }));
+    };
+  });
 
   return {
     products,

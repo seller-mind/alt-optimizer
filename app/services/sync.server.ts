@@ -66,9 +66,13 @@ async function upsertProduct(shopId: number, product: ShopifyProduct): Promise<v
 
 async function upsertProductImage(
   productId: number,
-  image: { id: string; src: string; altText: string | null },
+  image: { id: string; src: string; altText: string | null; variantTitles?: string[] },
   tags: string[]
 ): Promise<void> {
+  const variantTitles = image.variantTitles ?? [];
+  const variantTitlesStr = variantTitles.length > 0 ? variantTitles.join(", ") : null;
+  const isVariantImage = variantTitles.length > 0;
+
   const existingImage = await prisma.productImage.findFirst({
     where: {
       productId,
@@ -83,6 +87,8 @@ async function upsertProductImage(
         src: image.src,
         altTextOriginal: image.altText,
         tagsOriginal: tags.join(", "),
+        isVariantImage,
+        variantTitles: variantTitlesStr,
       },
     });
   } else {
@@ -93,6 +99,8 @@ async function upsertProductImage(
         src: image.src,
         altTextOriginal: image.altText,
         tagsOriginal: tags.join(", "),
+        isVariantImage,
+        variantTitles: variantTitlesStr,
         status: image.altText ? "applied" : "pending",
       },
     });
@@ -184,6 +192,8 @@ export async function getDashboardStats(shopId: number) {
     imagesWithAlt,
     imagesWithAi,
     imagesPending,
+    variantImages,
+    variantImagesWithoutAlt,
     usageMetrics,
   ] = await Promise.all([
     prisma.product.count({ where: { shopId } }),
@@ -197,6 +207,16 @@ export async function getDashboardStats(shopId: number) {
     prisma.productImage.count({
       where: { product: { shopId }, status: "pending" },
     }),
+    prisma.productImage.count({
+      where: { product: { shopId }, isVariantImage: true },
+    }),
+    prisma.productImage.count({
+      where: {
+        product: { shopId },
+        isVariantImage: true,
+        altTextOriginal: null,
+      },
+    }),
     prisma.usageMetric.aggregate({
       where: { shopId },
       _sum: { imagesGenerated: true, apiCalls: true },
@@ -209,6 +229,8 @@ export async function getDashboardStats(shopId: number) {
     imagesWithAlt,
     imagesWithAi,
     imagesPending,
+    variantImages,
+    variantImagesWithoutAlt,
     totalGenerated: usageMetrics._sum.imagesGenerated || 0,
     totalApiCalls: usageMetrics._sum.apiCalls || 0,
   };
