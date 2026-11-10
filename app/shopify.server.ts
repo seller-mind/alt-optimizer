@@ -8,6 +8,11 @@ import {
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
+import {
+  BILLING_PLANS as PLAN_DEFINITIONS,
+  BILLING_PLAN_KEYS,
+  type BillingPlanKey,
+} from "./billing-plans";
 
 /**
  * Recurring subscription line item.
@@ -42,42 +47,11 @@ type RecurringPlan = {
  * Free is intentionally absent — it is the default plan on every shop and
  * requires no charge.
  */
-export const BILLING_PLANS: Record<
-  "Starter" | "Professional" | "Business",
-  RecurringPlan
-> = {
-  Starter: {
-    lineItems: [
-      {
-        amount: 9,
-        currencyCode: "USD",
-        interval: BillingInterval.Every30Days,
-      },
-    ],
-  },
-  Professional: {
-    lineItems: [
-      {
-        amount: 19,
-        currencyCode: "USD",
-        interval: BillingInterval.Every30Days,
-      },
-    ],
-  },
-  Business: {
-    lineItems: [
-      {
-        amount: 49,
-        currencyCode: "USD",
-        interval: BillingInterval.Every30Days,
-      },
-    ],
-  },
-};
+export const BILLING_PLANS: Record<BillingPlanKey, RecurringPlan> =
+  PLAN_DEFINITIONS as unknown as Record<BillingPlanKey, RecurringPlan>;
 
-export type BillingPlanKey = keyof typeof BILLING_PLANS;
-
-export const BILLING_PLAN_KEYS = Object.keys(BILLING_PLANS) as BillingPlanKey[];
+export { BILLING_PLAN_KEYS };
+export type { BillingPlanKey };
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,

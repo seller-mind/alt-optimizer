@@ -19,7 +19,8 @@ import {
   Divider,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
-import { authenticate, BILLING_PLANS, BILLING_PLAN_KEYS, type BillingPlanKey } from "~/shopify.server";
+import { authenticate } from "~/shopify.server";
+import { BILLING_PLANS, BILLING_PLAN_KEYS, type BillingPlanKey } from "~/billing-plans";
 import prisma from "~/db.server";
 import { getCurrentUsage, getUsageHistory, deleteShopData } from "~/services/billing.server";
 import { getOrCreateShop } from "~/utils/shop.server";
