@@ -173,10 +173,16 @@ export function isBlockedHost(host: string): boolean {
 /* Fetch helper                                                        */
 /* ------------------------------------------------------------------ */
 
+type FetchResult = { status: number; ok: boolean; body: string };
+
+/** Cap on how much of a page we keep. Product markup is at the top; a 5 MB
+ *  page would otherwise sit in the function's memory for no benefit. */
+const MAX_BODY_CHARS = 800_000;
+
 async function timedFetch(
   url: string,
   budgetEnd: number,
-): Promise<Response | null> {
+): Promise<FetchResult | null> {
   // Every request is bounded by whatever is left of the scan budget, not by a
   // fixed timeout. Without this a scan that hit its deadline could still be
   // waiting on 12 in-flight requests, and the caller would see a dead request
@@ -195,7 +201,12 @@ async function timedFetch(
         Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
       },
     });
-    return res;
+    // The body is read here, while the abort timer is still armed. Returning
+    // the Response itself would clear the timer as soon as headers arrive and
+    // leave `res.text()` unbounded — which is how a single large product page
+    // used to stretch a 5.5s scan past the gateway timeout.
+    const body = await res.text();
+    return { status: res.status, ok: res.ok, body: body.slice(0, MAX_BODY_CHARS) };
   } catch {
     return null;
   } finally {
@@ -302,7 +313,7 @@ async function readRobots(
     };
   }
   if (!res.ok) return null;
-  const txt = await res.text();
+  const txt = res.body;
   return parseRobots(txt);
 }
 
@@ -342,7 +353,7 @@ async function readProductsJson(
 
   let body: { products?: JsonProduct[] } | null = null;
   try {
-    body = (await res.json()) as { products?: JsonProduct[] };
+    body = JSON.parse(res.body) as { products?: JsonProduct[] };
   } catch {
     return { status: "unavailable" };
   }
@@ -549,7 +560,7 @@ async function samplePages(
           return null;
         }
         if (!res.ok) return null;
-        const html = await res.text();
+        const html = res.body;
         return { handle: t.handle, title: t.title, stats: auditProductHtml(html, t.title) };
       }),
     );
@@ -801,7 +812,7 @@ async function sampleFromSitemap(
     const res = await timedFetch(`https://${domain}${path}`, budgetEnd);
     if (!res || !res.ok) continue;
 
-    const xml = await res.text();
+    const xml = res.body;
     const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)]
       .map((m) => m[1])
       .filter((u) => /\/products\//i.test(u))
