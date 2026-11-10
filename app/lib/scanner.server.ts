@@ -175,8 +175,15 @@ export function isBlockedHost(host: string): boolean {
 
 async function timedFetch(
   url: string,
-  timeoutMs = REQUEST_TIMEOUT_MS,
+  budgetEnd: number,
 ): Promise<Response | null> {
+  // Every request is bounded by whatever is left of the scan budget, not by a
+  // fixed timeout. Without this a scan that hit its deadline could still be
+  // waiting on 12 in-flight requests, and the caller would see a dead request
+  // instead of the partial report we promised.
+  const remaining = budgetEnd - Date.now();
+  if (remaining <= 250) return null;
+  const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, remaining);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -280,8 +287,11 @@ export function parseRobots(txt: string): RobotsPolicy {
   return policy;
 }
 
-async function readRobots(domain: string): Promise<RobotsPolicy | null> {
-  const res = await timedFetch(`https://${domain}/robots.txt`);
+async function readRobots(
+  domain: string,
+  budgetEnd: number,
+): Promise<RobotsPolicy | null> {
+  const res = await timedFetch(`https://${domain}/robots.txt`, budgetEnd);
   if (!res) return null;
   if (res.status === 404) {
     return {
@@ -318,6 +328,7 @@ async function readProductsJson(
   // reading every page would turn a scan into a mirror job and blow the budget.
   const res = await timedFetch(
     `https://${domain}/products.json?limit=250&page=1`,
+    budgetEnd,
   );
   if (!res) return { status: "unavailable" };
 
@@ -510,7 +521,10 @@ async function samplePages(
     const batch = targets.slice(i, i + SAMPLE_CONCURRENCY);
     const results = await Promise.all(
       batch.map(async (t) => {
-        const res = await timedFetch(`https://${domain}/products/${encodeURIComponent(t.handle)}`);
+        const res = await timedFetch(
+          `https://${domain}/products/${encodeURIComponent(t.handle)}`,
+          budgetEnd,
+        );
         if (!res) return null;
         if (res.status === 429) {
           rateLimited = true;
@@ -563,7 +577,7 @@ export async function runScan(rawDomain: string): Promise<ScanResult> {
   }
 
   // Step 1 — ask permission.
-  const robots = await readRobots(domain);
+  const robots = await readRobots(domain, budgetEnd);
   if (!robots) {
     return {
       ok: false,
@@ -766,7 +780,7 @@ async function sampleFromSitemap(
 
   for (const path of ["/sitemap_products_1.xml", "/sitemap.xml"]) {
     if (Date.now() > budgetEnd) break;
-    const res = await timedFetch(`https://${domain}${path}`);
+    const res = await timedFetch(`https://${domain}${path}`, budgetEnd);
     if (!res || !res.ok) continue;
 
     const xml = await res.text();
@@ -782,7 +796,7 @@ async function sampleFromSitemap(
       const batch = locs.slice(i, i + SAMPLE_CONCURRENCY);
       const results = await Promise.all(
         batch.map(async (url) => {
-          const r = await timedFetch(url);
+          const r = await timedFetch(url, budgetEnd);
           if (!r || !r.ok) return null;
           const html = await r.text();
           const handle =
