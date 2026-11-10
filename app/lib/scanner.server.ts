@@ -431,7 +431,13 @@ export function auditProductHtml(html: string, productTitle: string): PageAltSta
   const imgRe = /<img\b[^>]*>/gi;
   const altRe = /\balt\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
   const srcRe = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+  const dataSrcRe = /\bdata-src\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+  const srcsetRe = /\b(?:data-srcset|srcset)\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
   const classRe = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
+  // A blank pixel or SVG stub in `src` means the tag is a lazy-load shell.
+  const PLACEHOLDER_RE =
+    /(placeholder|blank\.(?:gif|png|svg)|spacer|transparent\.(?:gif|png)|1x1|pixel\.(?:gif|png))/i;
 
   const rank: Record<AltIssue, number> = {
     missing: 3,
@@ -442,17 +448,29 @@ export function auditProductHtml(html: string, productTitle: string): PageAltSta
 
   const matches = html.match(imgRe) ?? [];
 
+  const pick = (m: RegExpMatchArray | null) => (m ? (m[1] ?? m[2] ?? "") : "");
+
   for (const tag of matches) {
-    const srcM = tag.match(srcRe);
-    const src = srcM ? (srcM[1] ?? srcM[2] ?? "") : "";
-    const clsM = tag.match(classRe);
-    const cls = clsM ? (clsM[1] ?? clsM[2] ?? "") : "";
+    const srcRaw = pick(tag.match(srcRe));
+    const dataSrc = pick(tag.match(dataSrcRe));
+    const srcset = pick(tag.match(srcsetRe));
+    const cls = pick(tag.match(classRe));
+
+    // Lazy-loading themes park a blank pixel in `src` and put the real file in
+    // `data-src` or `srcset`. Reading only `src` would classify those images by
+    // their placeholder and report a well-described photo as missing — a false
+    // positive that costs us the store owner's trust the moment they check.
+    const srcsetFirst = (srcset.split(",")[0] ?? "").trim().split(/\s+/)[0] ?? "";
+    const src =
+      [dataSrc, srcsetFirst, srcRaw].find(
+        (c) => c && !c.startsWith("data:") && !PLACEHOLDER_RE.test(c),
+      ) ?? "";
 
     // Skip chrome: logos, icons, payment badges, spacers, inline data URIs.
     if (DECORATIVE_RE.test(src) || DECORATIVE_RE.test(cls)) continue;
-    if (src.startsWith("data:")) continue;
+    if (!src) continue;
     // Only count images that actually load from a CDN or the store itself.
-    if (!src || !(src.startsWith("http") || src.startsWith("//") || src.startsWith("/"))) {
+    if (!(src.startsWith("http") || src.startsWith("//") || src.startsWith("/"))) {
       continue;
     }
 
