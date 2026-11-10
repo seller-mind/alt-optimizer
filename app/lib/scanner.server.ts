@@ -22,9 +22,11 @@
  * 4. Requests carry an identifying User-Agent with a contact URL, so a store
  *    owner reading their access log can see exactly who we are and why.
  *
- * 5. Hard caps keep a single scan to roughly 22 requests: at most 250 products
- *    enumerated, at most 20 product pages sampled, 10s total budget. The goal
- *    is to answer "roughly how bad is it", not to mirror the catalogue.
+ * 5. Hard caps keep a single scan to roughly 14 requests: at most 250 products
+ *    enumerated, at most 12 product pages sampled, 5.5s total budget. The goal
+ *    is to answer "roughly how bad is it", not to mirror the catalogue. The
+ *    budget is deliberately below Vercel's function timeout so a slow store
+ *    degrades to a partial report instead of a dead request.
  *
  * ## Why we sample product pages instead of trusting products.json
  *
@@ -46,17 +48,17 @@ export const SCANNER_USER_AGENT =
 /** Requests time out fast so one slow store can't burn the whole budget. */
 const REQUEST_TIMEOUT_MS = 4000;
 
-/** Total wall-clock budget for one scan. Vercel Hobby functions cap at 10s. */
-const SCAN_BUDGET_MS = 8500;
+/** Total wall-clock budget. Kept well under the function timeout (see vercel.json). */
+const SCAN_BUDGET_MS = 5500;
 
 /** Products enumerated from products.json. Shopify pages at 250. */
 const MAX_PRODUCTS = 250;
 
 /** Product pages actually fetched. Each one costs a request. */
-const MAX_SAMPLED_PAGES = 20;
+const MAX_SAMPLED_PAGES = 12;
 
 /** Concurrent page fetches. Keeps us from looking like a flood. */
-const SAMPLE_CONCURRENCY = 5;
+const SAMPLE_CONCURRENCY = 6;
 
 /** In-memory cache so a page refresh doesn't re-crawl. Per-instance only. */
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
