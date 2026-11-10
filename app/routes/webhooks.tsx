@@ -92,7 +92,7 @@ export async function action({ request }: ActionFunctionArgs) {
       }
       case "app_subscriptions/update":
       case "APP_SUBSCRIPTIONS_UPDATE": {
-        await handleSubscriptionUpdate(payload);
+        await handleSubscriptionUpdate(shopDomain, payload);
         break;
       }
       case "app_subscriptions/decline":
@@ -192,11 +192,18 @@ async function handleCustomersRedact(shopDomain: string, payload: any): Promise<
  * APP_SUBSCRIPTIONS_UPDATE: Handle subscription changes.
  * Map the plan name to our plan type and update the shop.
  */
-async function handleSubscriptionUpdate(payload: any): Promise<void> {
-  const shopDomain = payload.shop_domain || payload.shop?.domain || "";
+async function handleSubscriptionUpdate(shopDomain: string, payload: any): Promise<void> {
+  // Shopify sends the shop domain in the X-Shopify-Shop-Domain header, not in
+  // the payload. Reading it from the payload (as this function used to) always
+  // yielded "" and made the handler return early, so planType was never updated.
   const planName = payload.app_subscription?.name || "";
   const status = payload.app_subscription?.status || "";
-  const chargeId = payload.app_subscription?.id?.toString() || "";
+  // Prefer the GraphQL id: `id` is the legacy numeric id, `admin_graphql_api_id`
+  // is the gid that billing.cancel expects.
+  const chargeId =
+    payload.app_subscription?.admin_graphql_api_id ||
+    payload.app_subscription?.id?.toString() ||
+    "";
 
   if (!shopDomain) {
     console.warn(`[Webhook] Subscription update missing shop domain`);
