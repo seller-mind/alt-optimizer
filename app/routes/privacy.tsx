@@ -2,7 +2,7 @@ import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 
 export const loader = async () => {
-  return json({ lastUpdated: "2026-08-29" });
+  return json({ lastUpdated: "2026-11-10" });
 };
 
 const s = {
@@ -25,35 +25,47 @@ export default function PrivacyPage() {
       <div style={s.card}>
         <h2 style={s.h2}>Privacy Policy for AltOptimizer</h2>
 
-        <h3 style={s.h3}>1. What Data We Collect</h3>
-        <p style={s.p}>AltOptimizer collects and processes the following data from your Shopify store:</p>
+        <h3 style={s.h3}>1. The Free Alt Text Scanner</h3>
+        <p style={s.p}>
+          The scanner at <code>/scanner</code> is a separate, public tool. It does not
+          require installing the App, creating an account, or connecting a Shopify store.
+        </p>
+        <p style={s.p}>• It reads only publicly accessible pages of the store you enter: the store&apos;s robots.txt file, its public product feed, and its rendered product pages.</p>
+        <p style={s.p}>• It honours the store&apos;s robots.txt. If the store asks automated tools not to scan it, the scan stops and no store data is read.</p>
+        <p style={s.p}>• It does not store your store&apos;s data. Scan results are generated on demand and are not written to any database. Results are cached in memory for a few hours so that refreshing the page does not re-scan the store, and that cache is discarded automatically.</p>
+        <p style={s.p}>• It does not collect email addresses, names, or any other personal information. The current version has no email capture of any kind.</p>
+        <p style={s.p}>• It does not access any Shopify admin, customer, or order data.</p>
+        <p style={s.p}>• Requests made by the scanner identify themselves with a User-Agent string that includes a link back to the scanner page.</p>
+
+        <h3 style={s.h3}>2. What Data We Collect</h3>
+        <p style={s.p}>When you install the App, AltOptimizer collects and processes the following data from your Shopify store:</p>
         <p style={s.p}>• Product data: titles, descriptions, handles, and image information</p>
         <p style={s.p}>• Product images: for AI analysis and alt text generation</p>
         <p style={s.p}>• Generated content: AI-generated alt text, product tags, and JSON-LD structured data</p>
         <p style={s.p}>• Usage metrics: number of images processed per month for quota tracking</p>
 
-        <h3 style={s.h3}>2. What We Do NOT Collect</h3>
+        <h3 style={s.h3}>3. What We Do NOT Collect</h3>
         <p style={s.p}>AltOptimizer does NOT collect:</p>
         <p style={s.p}>• Customer data (names, emails, addresses, payment information)</p>
         <p style={s.p}>• Order information or transaction data</p>
         <p style={s.p}>• Personal identifiable information of store visitors</p>
         <p style={s.p}>• Analytics or browsing behavior of store visitors</p>
 
-        <h3 style={s.h3}>3. How We Use Your Data</h3>
+        <h3 style={s.h3}>4. How We Use Your Data</h3>
         <p style={s.p}>• Product images are sent to our secure AI service for image analysis to generate descriptive alt text</p>
         <p style={s.p}>• Product titles and descriptions are used to generate relevant tags and structured data</p>
         <p style={s.p}>• Usage data is tracked to enforce the monthly generation quota</p>
 
-        <h3 style={s.h3}>4. Data Storage and Retention</h3>
+        <h3 style={s.h3}>5. Data Storage and Retention</h3>
         <p style={s.p}>• Your data is stored securely in our database while the app is installed</p>
         <p style={s.p}>• After uninstalling the app, your data is retained for 30 days (grace period) and then permanently deleted</p>
         <p style={s.p}>• You can request immediate data deletion at any time from the app&apos;s Settings page</p>
 
-        <h3 style={s.h3}>5. Data Sharing</h3>
+        <h3 style={s.h3}>6. Data Sharing</h3>
         <p style={s.p}>• Product images are sent to our AI service provider for image analysis. The service is used solely for generating alt text and related content.</p>
         <p style={s.p}>• We do not sell, trade, or share your data with any other third parties</p>
 
-        <h3 style={s.h3}>6. Contact</h3>
+        <h3 style={s.h3}>7. Contact</h3>
         <p style={s.p}>For privacy-related inquiries or data deletion requests, please contact the app developer through the Shopify App Store.</p>
       </div>
     </div>

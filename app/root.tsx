@@ -22,7 +22,7 @@ export const loader = async () => {
 };
 
 // Routes that should NOT be wrapped by App Bridge
-const STANDALONE_ROUTES = ["/auth", "/install", "/privacy", "/terms", "/healthcheck"];
+const STANDALONE_ROUTES = ["/auth", "/install", "/privacy", "/terms", "/healthcheck", "/scanner"];
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
